@@ -6,9 +6,10 @@ A lightweight, efficient C# Solution Explorer for Neovim that bridges the gap be
 
 ## Features
 
-- **Solution & Project Parsing**: Supports both legacy `.sln` and the modern XML-based `.slnx` files.
-- **LSP Integration**: Leverages `csharp_ls` for accurate project structure and file discovery.
+- **Solution & Project Parsing**: Supports both legacy `.sln` and the modern XML-based `.slnx` files, automatically rendering independently of the LSP.
+- **File Parsing Integration**: Provides fully native parsing, navigation, opening, and interaction mapping for C# files, `appsettings*.json`, `Dockerfile`, and `.http` files inside of the project.
 - **Nvim-Tree Integration**: Proxies file system operations (create, rename, delete) to `nvim-tree.lua` for a consistent experience.
+- **Directory Behaviors**: Nvim-tree style chevron markers and full expand all / collapse all tree manipulation commands.
 - **Finding Files**: Quickly locate the current buffer in the solution tree using `CSharpExplorerFindFile`.
 - **Gitignore Filtering**: Toggle visibility of gitignored files.
 - **Custom Clipboard**: Standalone copy/cut/paste functionality specifically for C# project items.
@@ -16,7 +17,6 @@ A lightweight, efficient C# Solution Explorer for Neovim that bridges the gap be
 ## Prerequisites
 
 - Neovim 0.9.0+
-- `csharp_ls` (Language Server)
 - [nvim-tree/nvim-tree.lua](https://github.com/nvim-tree/nvim-tree.lua)
 - [nvim-tree/nvim-web-devicons](https://github.com/nvim-tree/nvim-web-devicons) (optional, for icons)
 
@@ -47,11 +47,16 @@ Default setup options:
 require("csharp-explorer").setup({
     enabled = true,
     icons = {
+        arrow_open = " ",
+        arrow_closed = " ",
         solution = "󰘐 ",
         folder_open = "󰜢 ",
         folder_closed = "󰉋 ",
         project = "󰌛 ",
         cs_file = "󰠱 ",
+        appsettings = " ",
+        dockerfile = "󰡨 ",
+        http_file = "󰪹 ",
     },
     filter = {
         gitignored = true,
@@ -72,6 +77,8 @@ require("csharp-explorer").setup({
         cut = "x",
         paste = "p",
         toggle_gitignore = "I",
+        expand_all = "E",
+        collapse_all = "W",
     }
 })
 ```
@@ -82,6 +89,8 @@ require("csharp-explorer").setup({
 - `:CSharpExplorerFindFile`: Reveal current file in the explorer.
 - `:CSharpExplorerTogglePlugin`: Toggle this plugin
 - `:CSharpExplorerRefresh`: Refresh the solution tree
+- `:CSharpExplorerExpandAll`: Expand all folders across the solution.
+- `:CSharpExplorerCollapseAll`: Collapse all folders across the solution.
 
 ## Roadmap
 

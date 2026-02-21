@@ -47,14 +47,7 @@ function M.toggle()
         return
     end
 
-    local get_clients = vim.lsp.get_clients or vim.lsp.get_clients
-    local clients = get_clients({ name = "csharp_ls" })
-    if #clients == 0 then
-        vim.notify("csharp_ls is not running", vim.log.levels.WARN)
-        return
-    end
-
-    local root_dir = clients[1].config.root_dir
+    local root_dir = vim.fn.getcwd()
     local slnx_files = vim.fn.glob(root_dir .. "/*.slnx", false, true)
     local sln_files = vim.fn.glob(root_dir .. "/*.sln", false, true)
 
@@ -137,7 +130,7 @@ function M.find_file()
     end
 
     local function search_node(node)
-        if node._type == "cs_file" then
+        if not node._has_children then
             if node._path == target_path then
                 return true
             end
@@ -200,13 +193,7 @@ function M.refresh()
         return
     end
 
-    local get_clients = vim.lsp.get_clients or vim.lsp.get_clients
-    local clients = get_clients({ name = "csharp_ls" })
-    if #clients == 0 then
-        return
-    end
-
-    local root_dir = clients[1].config.root_dir
+    local root_dir = vim.fn.getcwd()
     local slnx_files = vim.fn.glob(root_dir .. "/*.slnx", false, true)
     local sln_files = vim.fn.glob(root_dir .. "/*.sln", false, true)
 
@@ -223,6 +210,16 @@ function M.refresh()
     end
 
     vim.notify("CSharp Explorer: Refreshed", vim.log.levels.INFO)
+end
+
+function M.expand_all()
+    if not M.is_active or not M.tree then return end
+    require("csharp-explorer.actions.navigation").expand_all(M)()
+end
+
+function M.collapse_all()
+    if not M.is_active or not M.tree then return end
+    require("csharp-explorer.actions.navigation").collapse_all(M)()
 end
 
 function M.setup(opts)
@@ -243,40 +240,37 @@ function M.setup(opts)
         { desc = "Toggle C# Solution Explorer Plugin" }
     )
     vim.api.nvim_create_user_command("CSharpExplorerRefresh", M.refresh, { desc = "Refresh C# Solution Explorer" })
+    vim.api.nvim_create_user_command("CSharpExplorerExpandAll", M.expand_all, { desc = "Expand All in C# Solution Explorer" })
+    vim.api.nvim_create_user_command("CSharpExplorerCollapseAll", M.collapse_all, { desc = "Collapse All in C# Solution Explorer" })
 
-    -- Dynamically hook into NvimTree commands when csharp_ls attaches
-    vim.api.nvim_create_autocmd("LspAttach", {
-        callback = function(args)
-            local client = vim.lsp.get_client_by_id(args.data.client_id)
-            if client and client.name == "csharp_ls" then
-                vim.api.nvim_create_user_command("NvimTreeToggle", function()
-                    local get_clients = vim.lsp.get_clients or vim.lsp.get_active_clients
-                    if
-                        config.current.enabled and (#get_clients({ name = "csharp_ls", bufnr = 0 }) > 0 or M.is_active)
-                    then
-                        M.toggle()
-                    else
-                        pcall(function()
-                            require("nvim-tree.api").tree.toggle()
-                        end)
-                    end
-                end, { force = true })
+    -- Hook into NvimTree commands to override them if a Solution file exists
+    vim.api.nvim_create_user_command("NvimTreeToggle", function()
+        local root_dir = vim.fn.getcwd()
+        local has_slnx = #vim.fn.glob(root_dir .. "/*.slnx", false, true) > 0
+        local has_sln = #vim.fn.glob(root_dir .. "/*.sln", false, true) > 0
 
-                vim.api.nvim_create_user_command("NvimTreeFindFile", function()
-                    local get_clients = vim.lsp.get_clients or vim.lsp.get_active_clients
-                    if
-                        config.current.enabled and (#get_clients({ name = "csharp_ls", bufnr = 0 }) > 0 or M.is_active)
-                    then
-                        M.find_file()
-                    else
-                        pcall(function()
-                            require("nvim-tree.api").tree.find_file()
-                        end)
-                    end
-                end, { force = true })
-            end
-        end,
-    })
+        if config.current.enabled and (M.is_active or has_slnx or has_sln) then
+            M.toggle()
+        else
+            pcall(function()
+                require("nvim-tree.api").tree.toggle()
+            end)
+        end
+    end, { force = true })
+
+    vim.api.nvim_create_user_command("NvimTreeFindFile", function()
+        local root_dir = vim.fn.getcwd()
+        local has_slnx = #vim.fn.glob(root_dir .. "/*.slnx", false, true) > 0
+        local has_sln = #vim.fn.glob(root_dir .. "/*.sln", false, true) > 0
+
+        if config.current.enabled and (M.is_active or has_slnx or has_sln) then
+            M.find_file()
+        else
+            pcall(function()
+                require("nvim-tree.api").tree.find_file()
+            end)
+        end
+    end, { force = true })
 
     -- Subscribe to nvim-tree file events to auto-refresh project trees
     if not M._events_bound then

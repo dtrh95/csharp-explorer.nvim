@@ -25,7 +25,7 @@ function M.parse(root_dir, target_file)
             local current = tree
             for part in string.gmatch(current_folder_path, "[^/]+") do
                 current._children[part] = current._children[part]
-                    or { _children = {}, _name = part, _type = "folder", _expanded = true, _has_children = true }
+                    or { _children = {}, _name = part, _type = "folder", _expanded = false, _has_children = true }
                 current = current._children[part]
             end
         elseif line:match("</Folder>") then
@@ -41,7 +41,7 @@ function M.parse(root_dir, target_file)
             local current = tree
             for part in string.gmatch(current_folder_path, "[^/]+") do
                 current._children[part] = current._children[part]
-                    or { _children = {}, _name = part, _type = "folder", _expanded = true, _has_children = true }
+                    or { _children = {}, _name = part, _type = "folder", _expanded = false, _has_children = true }
                 current = current._children[part]
             end
 

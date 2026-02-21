@@ -46,14 +46,31 @@ function M.render(state)
         elseif node._type == "cs_file" then
             icon = config.current.icons.cs_file
             hl = "String"
+        elseif node._type == "appsettings" then
+            icon = config.current.icons.appsettings
+            hl = "String"
+        elseif node._type == "dockerfile" then
+            icon = config.current.icons.dockerfile
+            hl = "String"
+        elseif node._type == "http_file" then
+            icon = config.current.icons.http_file
+            hl = "String"
         end
 
-        local display = indent .. icon .. node._name
+        local arrow = ""
+        if node._has_children then
+            arrow = node._expanded and config.current.icons.arrow_open or config.current.icons.arrow_closed
+        else
+            arrow = "  "
+        end
+
+        local display = indent .. arrow .. icon .. node._name
         table.insert(lines, display)
         node._line_num = #lines
         M.line_to_node[#lines] = node
 
-        table.insert(hl_map, { line = #lines - 1, col_start = #indent, col_end = #indent + #icon, hl = hl })
+        local col_start = #indent + #arrow
+        table.insert(hl_map, { line = #lines - 1, col_start = col_start, col_end = col_start + #icon, hl = hl })
 
         if node._expanded and node._has_children then
             if node._type == "project" and not node._cs_loaded then

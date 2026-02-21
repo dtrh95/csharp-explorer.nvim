@@ -6,7 +6,7 @@ local function get_nvim_tree_mock_node(node)
     if not node then
         return nil
     end
-    local is_file = (node._type == "cs_file")
+    local is_file = not node._has_children
     local path = node._path or node._dir
     if not path then
         vim.notify("Virtual folders cannot be manipulated directly", vim.log.levels.WARN)

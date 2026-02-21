@@ -35,7 +35,16 @@ function M.populate_cs_files(node)
     if node._type ~= "project" or node._cs_loaded then
         return
     end
-    local files = vim.fn.glob(node._dir .. "/**/*.cs", false, true)
+    local cs_files = vim.fn.glob(node._dir .. "/**/*.cs", false, true)
+    local appsettings_files = vim.fn.glob(node._dir .. "/**/appsettings*.json", false, true)
+    local dockerfiles = vim.fn.glob(node._dir .. "/**/Dockerfile", false, true)
+    local http_files = vim.fn.glob(node._dir .. "/**/*.http", false, true)
+
+    local files = {}
+    vim.list_extend(files, cs_files)
+    vim.list_extend(files, appsettings_files)
+    vim.list_extend(files, dockerfiles)
+    vim.list_extend(files, http_files)
 
     local ignored = {}
     if config.current.filter.gitignored then
@@ -67,10 +76,20 @@ function M.populate_cs_files(node)
                 current = current._children[part]
             end
             local f_name = parts[#parts]
+
+            local f_type = "cs_file"
+            if string.match(f_name, "^appsettings.*%.json$") then
+                f_type = "appsettings"
+            elseif string.match(f_name, "^Dockerfile$") then
+                f_type = "dockerfile"
+            elseif string.match(f_name, "%.http$") then
+                f_type = "http_file"
+            end
+
             current._children[f_name] = {
                 _children = {},
                 _name = f_name,
-                _type = "cs_file",
+                _type = f_type,
                 _expanded = false,
                 _path = f,
                 _has_children = false,

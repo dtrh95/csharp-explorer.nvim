@@ -25,6 +25,8 @@ function M.apply(state)
     bind_keys(km.open, navigation.open_node(state, false), opts)
     bind_keys(km.vsplit, navigation.open_node(state, true), opts)
     bind_keys(km.close_node, navigation.close_node(state), opts)
+    bind_keys(km.expand_all, navigation.expand_all(state), opts)
+    bind_keys(km.collapse_all, navigation.collapse_all(state), opts)
 
     -- File operations (proxied to nvim-tree)
     bind_keys(km.create, fs_actions.proxy_fs(state, "create"), opts)

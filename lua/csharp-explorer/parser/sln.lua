@@ -17,7 +17,7 @@ function M.parse(root_dir, target_file)
         _has_children = true,
     }
 
-    for project_path in content:gmatch('Project%("{[A-Fa-f0-9%-]+}")%s*=%s*%"[^%"]+%"%s*,%s*%"([^%"]+%.%w+)%"') do
+    for project_path in content:gmatch('Project%("{[A-Fa-f0-9%-]+}"%)%s*=%s*"[^"]+"%s*,%s*"([^"]+%.%w+)"') do
         project_path = project_path:gsub("\\", "/")
         local p_name = vim.fn.fnamemodify(project_path, ":t:r")
         local p_dir = vim.fn.resolve(root_dir .. "/" .. vim.fn.fnamemodify(project_path, ":h"))
@@ -32,7 +32,7 @@ function M.parse(root_dir, target_file)
         for i = 1, #parts - 1 do
             local part = parts[i]
             current._children[part] = current._children[part]
-                or { _children = {}, _name = part, _type = "folder", _expanded = true, _has_children = true }
+                or { _children = {}, _name = part, _type = "folder", _expanded = false, _has_children = true }
             current = current._children[part]
         end
         current._children[p_name] = {

@@ -23,7 +23,7 @@ function M.cut(node)
         M.cut_list[path] = {
             path = path,
             name = node._name,
-            is_dir = (node._type ~= "cs_file"),
+            is_dir = node._has_children,
         }
         vim.notify("Cut: " .. vim.fn.fnamemodify(path, ":t"), vim.log.levels.INFO)
     end
@@ -43,7 +43,7 @@ function M.copy(node)
         M.copy_list[path] = {
             path = path,
             name = node._name,
-            is_dir = (node._type ~= "cs_file"),
+            is_dir = node._has_children,
         }
         vim.notify("Copied: " .. vim.fn.fnamemodify(path, ":t"), vim.log.levels.INFO)
     end

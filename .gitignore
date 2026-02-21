@@ -1,0 +1,15 @@
+# Neovim & Lua
+/luals-out/
+/luals/
+*.swp
+*.swo
+*~
+tags
+doc/tags
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specifics
+# .stylua.toml

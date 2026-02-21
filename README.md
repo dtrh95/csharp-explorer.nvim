@@ -45,6 +45,7 @@ Default setup options:
 
 ```lua
 require("csharp-explorer").setup({
+    enabled = true,
     icons = {
         solution = "󰘐 ",
         folder_open = "󰜢 ",
@@ -79,6 +80,8 @@ require("csharp-explorer").setup({
 
 - `:CSharpExplorer`: Toggle the solution explorer.
 - `:CSharpExplorerFindFile`: Reveal current file in the explorer.
+- `:CSharpExplorerTogglePlugin`: Toggle this plugin
+- `:CSharpExplorerRefresh`: Refresh the solution tree
 
 ## Roadmap
 

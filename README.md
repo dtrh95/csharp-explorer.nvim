@@ -2,7 +2,7 @@
 
 A lightweight, efficient C# Solution Explorer for Neovim that bridges the gap between `csharp_ls` and `nvim-tree.lua`.
 
-![C# Explorer](https://user-images.githubusercontent.com/placeholder-image.png)
+[![Video](https://github.com/user-attachments/assets/a026d7b2-978f-4cbf-af6c-c3a84d76030c)](https://github.com/user-attachments/assets/dd0c0cf4-1b53-446e-aa7a-66aadf7a78cb)
 
 ## Features
 

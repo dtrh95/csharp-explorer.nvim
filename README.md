@@ -92,6 +92,24 @@ require("csharp-explorer").setup({
 - `:CSharpExplorerExpandAll`: Expand all folders across the solution.
 - `:CSharpExplorerCollapseAll`: Collapse all folders across the solution.
 
+## Events
+
+You can hook into plugin enablement state changes by listening to these Neovim `User` autocommands:
+
+- `CSharpExplorerEnable`: Fired when the plugin is explicitly enabled.
+- `CSharpExplorerDisable`: Fired when the plugin is disabled.
+
+Example usage:
+
+```lua
+vim.api.nvim_create_autocmd("User", {
+    pattern = "CSharpExplorerEnable",
+    callback = function()
+        print("CSharpExplorer is now active!")
+    end,
+})
+```
+
 ## Roadmap
 
 We aim to achieve feature parity with IDE-like solution trees (Visual Studio/Rider). See our detailed [ROADMAP.md](ROADMAP.md) for more details.

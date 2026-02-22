@@ -15,6 +15,7 @@ M.config = config.current
 
 function M.enable()
     config.current.enabled = true
+    vim.api.nvim_exec_autocmds("User", { pattern = "CSharpExplorerEnable" })
     vim.notify("CSharp Explorer Enabled", vim.log.levels.INFO)
 end
 
@@ -23,6 +24,7 @@ function M.disable()
     if M.is_active then
         M.toggle()
     end
+    vim.api.nvim_exec_autocmds("User", { pattern = "CSharpExplorerDisable" })
     vim.notify("CSharp Explorer Disabled", vim.log.levels.INFO)
 end
 
@@ -242,35 +244,8 @@ function M.setup(opts)
     vim.api.nvim_create_user_command("CSharpExplorerRefresh", M.refresh, { desc = "Refresh C# Solution Explorer" })
     vim.api.nvim_create_user_command("CSharpExplorerExpandAll", M.expand_all, { desc = "Expand All in C# Solution Explorer" })
     vim.api.nvim_create_user_command("CSharpExplorerCollapseAll", M.collapse_all, { desc = "Collapse All in C# Solution Explorer" })
-
-    -- Hook into NvimTree commands to override them if a Solution file exists
-    vim.api.nvim_create_user_command("NvimTreeToggle", function()
-        local root_dir = vim.fn.getcwd()
-        local has_slnx = #vim.fn.glob(root_dir .. "/*.slnx", false, true) > 0
-        local has_sln = #vim.fn.glob(root_dir .. "/*.sln", false, true) > 0
-
-        if config.current.enabled and (M.is_active or has_slnx or has_sln) then
-            M.toggle()
-        else
-            pcall(function()
-                require("nvim-tree.api").tree.toggle()
-            end)
-        end
-    end, { force = true })
-
-    vim.api.nvim_create_user_command("NvimTreeFindFile", function()
-        local root_dir = vim.fn.getcwd()
-        local has_slnx = #vim.fn.glob(root_dir .. "/*.slnx", false, true) > 0
-        local has_sln = #vim.fn.glob(root_dir .. "/*.sln", false, true) > 0
-
-        if config.current.enabled and (M.is_active or has_slnx or has_sln) then
-            M.find_file()
-        else
-            pcall(function()
-                require("nvim-tree.api").tree.find_file()
-            end)
-        end
-    end, { force = true })
+    vim.api.nvim_create_user_command("CSharpExplorerToggle", M.toggle, { desc = "Toggle the CSharpExplorer tree" })
+    vim.api.nvim_create_user_command("CSharpExplorerFindFile", M.find_file, { desc = "Expose current file in solution tree" })
 
     -- Subscribe to nvim-tree file events to auto-refresh project trees
     if not M._events_bound then

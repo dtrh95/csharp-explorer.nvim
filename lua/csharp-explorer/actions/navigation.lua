@@ -18,7 +18,8 @@ function M.open_node(state, vsplit)
             node._expanded = not node._expanded
             renderer.render(state)
             vim.api.nvim_win_set_cursor(state.win, { node._line_num, 0 })
-        elseif node._type == "cs_file" or node._type == "appsettings" or node._type == "dockerfile" or node._type == "http_file" then
+        else
+            -- If it has no children, it's a file. Open it in the previous window.
             vim.cmd("wincmd p")
             if vsplit then
                 vim.cmd("vsplit " .. vim.fn.fnameescape(node._path))

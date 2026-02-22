@@ -13,6 +13,10 @@ local function get_nvim_tree_mock_node(node)
         return nil
     end
 
+    if node._type == "project" then
+        path = vim.fn.fnamemodify(path, ":h")
+    end
+
     local ok_f, FileNode = pcall(require, "nvim-tree.node.file")
     local ok_d, DirectoryNode = pcall(require, "nvim-tree.node.directory")
     if not ok_f or not ok_d then

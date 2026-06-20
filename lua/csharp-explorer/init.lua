@@ -250,8 +250,8 @@ function M.setup(opts)
     -- Subscribe to nvim-tree file events to auto-refresh project trees
     if not M._events_bound then
         M._events_bound = true
-        local ok_ev, nev = pcall(require, "nvim-tree.events")
-        if ok_ev then
+        local ok_api, api = pcall(require, "nvim-tree.api")
+        if ok_api and api.events then
             local function on_fs_change()
                 if not M.tree then
                     return
@@ -262,11 +262,12 @@ function M.setup(opts)
                 end
             end
 
-            nev.subscribe(nev.Event.FileCreated, on_fs_change)
-            nev.subscribe(nev.Event.FolderCreated, on_fs_change)
-            nev.subscribe(nev.Event.FileRemoved, on_fs_change)
-            nev.subscribe(nev.Event.FolderRemoved, on_fs_change)
-            nev.subscribe(nev.Event.NodeRenamed, on_fs_change)
+            local Event = api.events.Event
+            api.events.subscribe(Event.FileCreated, on_fs_change)
+            api.events.subscribe(Event.FolderCreated, on_fs_change)
+            api.events.subscribe(Event.FileRemoved, on_fs_change)
+            api.events.subscribe(Event.FolderRemoved, on_fs_change)
+            api.events.subscribe(Event.NodeRenamed, on_fs_change)
         end
     end
 end

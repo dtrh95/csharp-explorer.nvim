@@ -26,10 +26,11 @@ function M.cut(node)
         M.cut_list[path] = nil
         vim.notify("Removed from clipboard: " .. vim.fn.fnamemodify(path, ":t"), vim.log.levels.INFO)
     else
+        local node_utils = require("csharp-explorer.node")
         M.cut_list[path] = {
             path = path,
             name = node._name,
-            is_dir = node._has_children,
+            is_dir = node_utils.is_directory(node),
         }
         vim.notify("Cut: " .. vim.fn.fnamemodify(path, ":t"), vim.log.levels.INFO)
     end
@@ -46,10 +47,11 @@ function M.copy(node)
         M.copy_list[path] = nil
         vim.notify("Removed from clipboard: " .. vim.fn.fnamemodify(path, ":t"), vim.log.levels.INFO)
     else
+        local node_utils = require("csharp-explorer.node")
         M.copy_list[path] = {
             path = path,
             name = node._name,
-            is_dir = node._has_children,
+            is_dir = node_utils.is_directory(node),
         }
         vim.notify("Copied: " .. vim.fn.fnamemodify(path, ":t"), vim.log.levels.INFO)
     end

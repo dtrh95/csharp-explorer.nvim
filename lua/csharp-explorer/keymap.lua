@@ -21,9 +21,30 @@ function M.apply(state)
     local km = config.current.keymaps
 
     bind_keys(km.close, state.toggle, opts)
-    bind_keys(km.open, navigation.open_node(state, false), opts)
+
+    if km.open then
+        if type(km.open) == "table" then
+            for _, k in ipairs(km.open) do
+                if k:find("Mouse") then
+                    vim.keymap.set("n", k, navigation.open_mouse(state), opts)
+                else
+                    vim.keymap.set("n", k, navigation.open_node(state, false), opts)
+                end
+            end
+        elseif type(km.open) == "string" then
+            if km.open:find("Mouse") then
+                vim.keymap.set("n", km.open, navigation.open_mouse(state), opts)
+            else
+                vim.keymap.set("n", km.open, navigation.open_node(state, false), opts)
+            end
+        end
+    end
+
     bind_keys(km.vsplit, navigation.open_node(state, true), opts)
     bind_keys(km.close_node, navigation.close_node(state), opts)
+    if km.toggle_expand then
+        bind_keys(km.toggle_expand, navigation.toggle_expand(state), opts)
+    end
     bind_keys(km.expand_all, navigation.expand_all(state), opts)
     bind_keys(km.collapse_all, navigation.collapse_all(state), opts)
     bind_keys(km.open_properties, navigation.open_properties(state), opts)

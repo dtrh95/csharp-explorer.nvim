@@ -142,12 +142,8 @@ function M.find_file()
     end
 
     local function search_node(node)
-        if node._type == "project" and node._path and metadata.normalize_path(node._path):lower() == target_lower then
+        if node._path and metadata.normalize_path(node._path):lower() == target_lower then
             return true
-        end
-
-        if not node._has_children then
-            return node._path and metadata.normalize_path(node._path):lower() == target_lower
         end
 
         if node._type == "project" then
@@ -166,7 +162,7 @@ function M.find_file()
             return false
         end
 
-        if node._type == "folder" or node._type == "solution" then
+        if node._type == "folder" or node._type == "solution" or node_utils.is_nested_parent(node) then
             for _, child in pairs(node._children) do
                 if search_node(child) then
                     node._expanded = true
@@ -217,7 +213,7 @@ function M.refresh()
     end
 
     local snapshot = node_utils.snapshot_tree_expansion(M.tree)
-    metadata._cache = {}
+    metadata.clear_cache()
 
     local fresh_tree = parse_workspace_solution(vim.fn.getcwd())
     if fresh_tree then

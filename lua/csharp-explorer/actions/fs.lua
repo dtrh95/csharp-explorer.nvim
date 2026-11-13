@@ -7,7 +7,8 @@ local function get_nvim_tree_mock_node(node)
         vim.notify("Virtual metadata nodes cannot be modified on disk", vim.log.levels.WARN)
         return nil
     end
-    local is_file = not node._has_children
+    local node_utils = require("csharp-explorer.node")
+    local is_file = node_utils.is_file(node)
     local path = node._path or node._dir
     if not path then
         vim.notify("Virtual folders cannot be manipulated directly", vim.log.levels.WARN)

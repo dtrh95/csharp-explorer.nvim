@@ -1,7 +1,21 @@
 local config = require("csharp-explorer.config")
 local metadata = require("csharp-explorer.metadata")
+local nesting = require("csharp-explorer.nesting")
+local uv = vim.uv or vim.loop
 
 local M = {}
+
+M.FILE_NODE_TYPES = {
+    cs_file = true,
+    appsettings = true,
+    dockerfile = true,
+    http_file = true,
+    cshtml_file = true,
+    razor_file = true,
+    css_file = true,
+    xaml_file = true,
+    resx_file = true,
+}
 
 M.NODE_PRIORITIES = {
     solution = 0,
@@ -14,6 +28,11 @@ M.NODE_PRIORITIES = {
     appsettings = 40,
     dockerfile = 40,
     http_file = 40,
+    cshtml_file = 40,
+    razor_file = 40,
+    css_file = 40,
+    xaml_file = 40,
+    resx_file = 40,
     package = 40,
     project_reference = 40,
 }
@@ -23,6 +42,48 @@ function M.get_priority(node)
         return M.NODE_PRIORITIES.cs_file
     end
     return node._sort_priority or M.NODE_PRIORITIES[node._type] or M.NODE_PRIORITIES.cs_file
+end
+
+function M.is_file(node)
+    return node ~= nil and M.FILE_NODE_TYPES[node._type] == true
+end
+
+function M.is_directory(node)
+    return node ~= nil
+        and not node._virtual
+        and (node._type == "folder" or node._type == "project" or node._type == "solution")
+end
+
+function M.can_expand(node)
+    return node ~= nil and node._has_children == true
+end
+
+function M.is_nested_parent(node)
+    return M.is_file(node) and node._has_children == true
+end
+
+function M.classify_file_type(f_name)
+    local lower = f_name:lower()
+    if lower:match("^appsettings.*%.json$") then
+        return "appsettings"
+    elseif lower == "dockerfile" or lower:match("^dockerfile%..+$") or lower == ".dockerignore" then
+        return "dockerfile"
+    elseif lower:match("%.http$") then
+        return "http_file"
+    elseif lower:match("%.cshtml$") or lower:match("%.cshtml%.cs$") then
+        return lower:match("%.cshtml%.cs$") and "cs_file" or "cshtml_file"
+    elseif lower:match("%.razor$") or lower:match("%.razor%.cs$") then
+        return lower:match("%.razor%.cs$") and "cs_file" or "razor_file"
+    elseif lower:match("%.css$") then
+        return "css_file"
+    elseif lower:match("%.xaml$") or lower:match("%.xaml%.cs$") then
+        return lower:match("%.xaml%.cs$") and "cs_file" or "xaml_file"
+    elseif lower:match("%.resx$") or lower:match("%.designer%.cs$") then
+        return (lower:match("%.designer%.cs$") or lower:match("%.cs$")) and "cs_file" or "resx_file"
+    elseif lower:match("%.cs$") then
+        return "cs_file"
+    end
+    return "cs_file"
 end
 
 local function get_gitignored_set(dir, files)
@@ -162,40 +223,114 @@ function M.collect_solution_projects(root)
     return projects
 end
 
+local function is_supported_project_file(name)
+    local lower = name:lower()
+    if lower:sub(-3) == ".cs" then
+        return true
+    end
+    if
+        lower:sub(-7) == ".cshtml"
+        or lower:sub(-6) == ".razor"
+        or lower:sub(-10) == ".razor.css"
+        or lower:sub(-5) == ".xaml"
+        or lower:sub(-5) == ".resx"
+        or lower:sub(-5) == ".http"
+    then
+        return true
+    end
+    if lower:match("^appsettings.*%.json$") then
+        return true
+    end
+    if name == "Dockerfile" or vim.startswith(name, "Dockerfile.") or name == ".dockerignore" then
+        return true
+    end
+    return false
+end
+
+local IGNORED_SCAN_DIRS = {
+    [".git"] = true,
+    [".vs"] = true,
+    [".idea"] = true,
+    bin = true,
+    obj = true,
+    node_modules = true,
+}
+
+local function scan_project_files(root_dir)
+    local files = {}
+    local norm_root = metadata.normalize_path(root_dir)
+    local stack = { norm_root }
+    while #stack > 0 do
+        local curr = stack[#stack]
+        stack[#stack] = nil
+        local handle = uv.fs_scandir(curr)
+        if handle then
+            while true do
+                local name, ftype = uv.fs_scandir_next(handle)
+                if not name then
+                    break
+                end
+                local full = curr .. "/" .. name
+                if not ftype then
+                    local st = uv.fs_stat(full)
+                    ftype = st and st.type or nil
+                end
+                if ftype == "directory" then
+                    if not IGNORED_SCAN_DIRS[name] then
+                        stack[#stack + 1] = full
+                    end
+                elseif ftype == "file" and is_supported_project_file(name) then
+                    files[#files + 1] = full
+                end
+            end
+        end
+    end
+    return files
+end
+
 function M.populate_cs_files(node)
     if node._type ~= "project" or node._cs_loaded then
         return
     end
-    local cs_files = vim.fn.glob(node._dir .. "/**/*.cs", false, true)
-    local appsettings_files = vim.fn.glob(node._dir .. "/**/appsettings*.json", false, true)
-    local dockerfiles = vim.fn.glob(node._dir .. "/**/Dockerfile", false, true)
-    local http_files = vim.fn.glob(node._dir .. "/**/*.http", false, true)
 
-    local files = {}
-    vim.list_extend(files, cs_files)
-    vim.list_extend(files, appsettings_files)
-    vim.list_extend(files, dockerfiles)
-    vim.list_extend(files, http_files)
+    local files = scan_project_files(node._dir)
 
     local ignored = {}
     if config.current.filter.gitignored then
         ignored = get_gitignored_set(node._dir, files)
     end
 
+    local by_dir = {}
+    local dir_order = {}
+    local norm_node_dir = metadata.normalize_path(node._dir)
+
     for _, f in ipairs(files) do
         if not ignored[f] then
-            local rel = string.sub(f, string.len(node._dir) + 2)
-            local parts = {}
-            for part in string.gmatch(rel, "[^/]+") do
-                table.insert(parts, part)
+            local file_dir = metadata.normalize_path(vim.fn.fnamemodify(f, ":h"))
+            local f_name = vim.fn.fnamemodify(f, ":t")
+            if not by_dir[file_dir] then
+                by_dir[file_dir] = {}
+                table.insert(dir_order, file_dir)
             end
+            table.insert(by_dir[file_dir], f_name)
+        end
+    end
 
-            local current = node
-            local current_dir = node._dir
-            for i = 1, #parts - 1 do
-                local part = parts[i]
+    table.sort(dir_order, function(a, b)
+        return #a < #b
+    end)
+
+    local nesting_enabled = not (config.current.nesting and config.current.nesting.enabled == false)
+    local expand_nested = (config.current.nesting and config.current.nesting.expand_by_default == true)
+
+    for _, dir_path in ipairs(dir_order) do
+        local parent_container = node
+        if dir_path ~= norm_node_dir then
+            local rel_dir = dir_path:sub(#norm_node_dir + 2)
+            local current_dir = norm_node_dir
+            for part in rel_dir:gmatch("[^/]+") do
                 current_dir = current_dir .. "/" .. part
-                current._children[part] = current._children[part]
+                parent_container._children[part] = parent_container._children[part]
                     or {
                         _children = {},
                         _name = part,
@@ -205,28 +340,55 @@ function M.populate_cs_files(node)
                         _dir = current_dir,
                         _sort_priority = M.NODE_PRIORITIES.folder,
                     }
-                current = current._children[part]
+                parent_container = parent_container._children[part]
             end
-            local f_name = parts[#parts]
+        end
 
-            local f_type = "cs_file"
-            if string.match(f_name, "^appsettings.*%.json$") then
-                f_type = "appsettings"
-            elseif string.match(f_name, "^Dockerfile$") then
-                f_type = "dockerfile"
-            elseif string.match(f_name, "%.http$") then
-                f_type = "http_file"
-            end
+        local dir_files = by_dir[dir_path]
+        local partition
+        if nesting_enabled then
+            local custom_rules = config.current.nesting and config.current.nesting.rules
+            partition = nesting.partition_directory_files(dir_files, custom_rules)
+        else
+            partition = {
+                top_level = dir_files,
+                children_by_parent = {},
+            }
+        end
 
-            current._children[f_name] = {
+        for _, name in ipairs(partition.top_level) do
+            local f_type = M.classify_file_type(name)
+            local f_path = dir_path .. "/" .. name
+            local nested_children = partition.children_by_parent[name]
+            local has_nested = nested_children ~= nil and #nested_children > 0
+
+            local file_node = {
                 _children = {},
-                _name = f_name,
+                _name = name,
                 _type = f_type,
-                _expanded = false,
-                _path = f,
-                _has_children = false,
+                _expanded = has_nested and expand_nested or false,
+                _path = f_path,
+                _has_children = has_nested,
                 _sort_priority = M.NODE_PRIORITIES[f_type] or M.NODE_PRIORITIES.cs_file,
             }
+
+            if has_nested then
+                for _, child_name in ipairs(nested_children) do
+                    local child_type = M.classify_file_type(child_name)
+                    local child_path = dir_path .. "/" .. child_name
+                    file_node._children[child_name] = {
+                        _children = {},
+                        _name = child_name,
+                        _type = child_type,
+                        _expanded = false,
+                        _path = child_path,
+                        _has_children = false,
+                        _sort_priority = M.NODE_PRIORITIES[child_type] or M.NODE_PRIORITIES.cs_file,
+                    }
+                end
+            end
+
+            parent_container._children[name] = file_node
         end
     end
 
@@ -339,6 +501,7 @@ end
 
 function M.reset_projects(node)
     if node._type == "project" then
+        node._archetype = nil
         if node._cs_loaded or node._meta_loaded then
             local saved = {}
             if node._saved_expanded then

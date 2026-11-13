@@ -15,6 +15,8 @@ function M.parse(root_dir, target_file)
         _expanded = true,
         _is_root = true,
         _has_children = true,
+        _path = vim.fn.resolve(target_file):gsub("\\", "/"),
+        _dir = vim.fn.resolve(root_dir):gsub("\\", "/"):gsub("/+$", ""),
     }
 
     for project_path in content:gmatch('Project%("{[A-Fa-f0-9%-]+}"%)%s*=%s*"[^"]+"%s*,%s*"([^"]+%.%w+)"') do

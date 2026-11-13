@@ -19,13 +19,13 @@ _Focus: Visibility into what makes up a project beyond just source files._
 
 _Focus: Bringing the richness of IDE trees to the Neovim buffer._
 
-- [ ] **Diagnostic Signs**:
+- [x] **Diagnostic Signs**:
   - Show error/warning icons next to files/projects (integrated with `vim.diagnostic`).
-- [ ] **File Nesting**:
+- [x] **File Nesting**:
   - Logic to group related files (e.g., `App.xaml` -> `App.xaml.cs`).
-- [ ] **Dynamic Icon Themes**:
+- [x] **Dynamic Icon Themes**:
   - Support for project-specific icons (Web, Console, Library, Test).
-- [ ] **Item Metadata (Properties Window)**:
+- [x] **Item Metadata (Properties Window)**:
   - Floating window showing file details (Size, Type, Build Action, Namespace).
 
 ## Phase 3: Project Orchestration 🛠️
@@ -54,4 +54,4 @@ _Focus: Deep integration with LSP and build tools._
 
 ## Progress Tracking
 
-Completed **Phase 0 (Foundation)** and **Phase 1 (Project Metadata & Dependencies)**. Next up is **Phase 2 (Enhanced UI & Visual Feedback)**.
+Completed **Phase 0 (Foundation)**, **Phase 1 (Project Metadata & Dependencies)**, and **Phase 2 (Enhanced UI & Visual Feedback)**. Next up is **Phase 3 (Project Orchestration)**.

@@ -1,5 +1,6 @@
 local config = require("csharp-explorer.config")
 local node_utils = require("csharp-explorer.node")
+local metadata = require("csharp-explorer.metadata")
 local clipboard = require("csharp-explorer.actions.clipboard")
 
 local M = {}
@@ -41,15 +42,17 @@ function M.render(state)
             icon = node._expanded and config.current.icons.folder_open or config.current.icons.folder_closed
             hl = "Directory"
         elseif node._type == "project" then
-            icon = config.current.icons.project
-            hl = "Type"
-        elseif
-            node._type == "cs_file"
-            or node._type == "appsettings"
-            or node._type == "dockerfile"
-            or node._type == "http_file"
-        then
-            icon = config.current.icons[node._type]
+            if config.current.dynamic_icons and config.current.dynamic_icons.enabled ~= false and node._path then
+                node._archetype = node._archetype or metadata.get_project_profile(node._path).archetype
+                icon = config.current.icons["project_" .. node._archetype] or config.current.icons.project
+                hl = (config.current.project_highlights and config.current.project_highlights[node._archetype])
+                    or "Type"
+            else
+                icon = config.current.icons.project
+                hl = "Type"
+            end
+        elseif node_utils.is_file(node) then
+            icon = config.current.icons[node._type] or config.current.icons.cs_file
             hl = "String"
         elseif node._type == "dependencies" then
             icon = config.current.icons.dependencies
@@ -72,6 +75,7 @@ function M.render(state)
         local display = indent .. arrow .. icon .. node._name
         table.insert(lines, display)
         node._line_num = #lines
+        node._arrow_end_col = vim.fn.strdisplaywidth(indent .. arrow)
         M.line_to_node[#lines] = node
 
         local col_start = #indent + #arrow
@@ -140,6 +144,10 @@ function M.render(state)
                 })
             end
         end
+    end
+
+    if package.loaded["csharp-explorer.diagnostics"] then
+        require("csharp-explorer.diagnostics").render_extmarks(state)
     end
 end
 

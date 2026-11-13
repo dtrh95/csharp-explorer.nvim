@@ -1,8 +1,29 @@
 local renderer = require("csharp-explorer.renderer")
 local metadata = require("csharp-explorer.metadata")
+local node_utils = require("csharp-explorer.node")
 local uv = vim.uv or vim.loop
 
 local M = {}
+
+local function focus_editor_window(state)
+    local alt = vim.fn.win_getid(vim.fn.winnr("#"))
+    if
+        alt ~= 0
+        and alt ~= state.win
+        and vim.api.nvim_win_is_valid(alt)
+        and vim.api.nvim_win_get_config(alt).relative == ""
+    then
+        vim.api.nvim_set_current_win(alt)
+        return
+    end
+    for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+        if w ~= state.win and vim.api.nvim_win_is_valid(w) and vim.api.nvim_win_get_config(w).relative == "" then
+            vim.api.nvim_set_current_win(w)
+            return
+        end
+    end
+    vim.cmd("rightbelow vsplit")
+end
 
 function M.get_node(state)
     local cursor = vim.api.nvim_win_get_cursor(state.win)
@@ -45,6 +66,22 @@ function M.reveal_project_in_tree(state, abs_path)
     return true
 end
 
+function M.toggle_expand(state)
+    return function()
+        local node = M.get_node(state)
+        if not node then
+            return
+        end
+        if node_utils.can_expand(node) then
+            node._expanded = not node._expanded
+            renderer.render(state)
+            if node._line_num then
+                vim.api.nvim_win_set_cursor(state.win, { node._line_num, 0 })
+            end
+        end
+    end
+end
+
 function M.open_node(state, vsplit)
     return function()
         local node = M.get_node(state)
@@ -52,7 +89,7 @@ function M.open_node(state, vsplit)
             return
         end
 
-        if node._has_children then
+        if not node_utils.is_file(node) and node_utils.can_expand(node) then
             node._expanded = not node._expanded
             renderer.render(state)
             if node._line_num then
@@ -72,7 +109,7 @@ function M.open_node(state, vsplit)
             end
 
             if uv.fs_stat(target_path) then
-                vim.cmd("wincmd p")
+                focus_editor_window(state)
                 local cmd = vsplit and "vsplit " or "edit "
                 vim.cmd(cmd .. vim.fn.fnameescape(target_path))
             else
@@ -91,11 +128,32 @@ function M.open_node(state, vsplit)
             return
         end
 
-        if node._path then
-            vim.cmd("wincmd p")
-            local cmd = vsplit and "vsplit " or "edit "
-            vim.cmd(cmd .. vim.fn.fnameescape(node._path))
+        if node_utils.is_file(node) or node._path then
+            if node._path then
+                focus_editor_window(state)
+                local cmd = vsplit and "vsplit " or "edit "
+                vim.cmd(cmd .. vim.fn.fnameescape(node._path))
+            end
         end
+    end
+end
+
+function M.open_mouse(state)
+    return function()
+        local pos = vim.fn.getmousepos()
+        if pos and pos.winid == state.win and pos.line > 0 then
+            vim.api.nvim_win_set_cursor(state.win, { pos.line, 0 })
+            local node = renderer.line_to_node[pos.line]
+            if node and node_utils.can_expand(node) and pos.column > 0 and pos.column <= (node._arrow_end_col or 2) then
+                node._expanded = not node._expanded
+                renderer.render(state)
+                if node._line_num then
+                    vim.api.nvim_win_set_cursor(state.win, { node._line_num, 0 })
+                end
+                return
+            end
+        end
+        M.open_node(state, false)()
     end
 end
 
@@ -106,7 +164,7 @@ function M.close_node(state)
             return
         end
 
-        if node._has_children and node._expanded then
+        if node_utils.can_expand(node) and node._expanded then
             node._expanded = false
             renderer.render(state)
             if node._line_num then
@@ -124,7 +182,6 @@ local function set_expanded_recursive(node, expanded, root_tree)
             return
         end
         if node._type == "project" and expanded then
-            local node_utils = require("csharp-explorer.node")
             if not node._cs_loaded then
                 node_utils.populate_cs_files(node)
             end
@@ -179,7 +236,7 @@ function M.open_properties(state)
                 curr = curr._parent
             end
             if curr and curr._type == "project" and curr._path then
-                vim.cmd("wincmd p")
+                focus_editor_window(state)
                 vim.cmd("edit " .. vim.fn.fnameescape(curr._path))
             else
                 vim.notify("Cursor is not inside a C# project", vim.log.levels.WARN)

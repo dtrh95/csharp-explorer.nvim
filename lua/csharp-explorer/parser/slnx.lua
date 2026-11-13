@@ -16,6 +16,8 @@ function M.parse(root_dir, target_file)
         _expanded = true,
         _is_root = true,
         _has_children = true,
+        _path = vim.fn.resolve(target_file):gsub("\\", "/"),
+        _dir = vim.fn.resolve(norm_root):gsub("\\", "/"):gsub("/+$", ""),
     }
     local folder_stack = {}
 

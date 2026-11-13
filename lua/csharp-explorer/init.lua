@@ -6,6 +6,8 @@ local renderer = require("csharp-explorer.renderer")
 local keymap = require("csharp-explorer.keymap")
 local navigation = require("csharp-explorer.actions.navigation")
 local metadata = require("csharp-explorer.metadata")
+local diagnostics = require("csharp-explorer.diagnostics")
+local properties = require("csharp-explorer.actions.properties")
 
 local M = {}
 
@@ -38,6 +40,9 @@ end
 
 function M.enable()
     config.current.enabled = true
+    if config.current.diagnostics and config.current.diagnostics.enabled ~= false then
+        diagnostics.attach(M)
+    end
     vim.api.nvim_exec_autocmds("User", { pattern = "CSharpExplorerEnable" })
     vim.notify("CSharp Explorer Enabled", vim.log.levels.INFO)
 end
@@ -47,6 +52,7 @@ function M.disable()
     if M.is_active then
         M.toggle()
     end
+    diagnostics.detach()
     vim.api.nvim_exec_autocmds("User", { pattern = "CSharpExplorerDisable" })
     vim.notify("CSharp Explorer Disabled", vim.log.levels.INFO)
 end
@@ -195,6 +201,10 @@ function M.open_properties()
     navigation.open_properties(M)()
 end
 
+function M.item_properties()
+    properties.open(M)()
+end
+
 function M.toggle_gitignore()
     config.current.filter.gitignored = not config.current.filter.gitignored
     if M.tree then
@@ -258,6 +268,11 @@ function M.setup(opts)
         M.open_properties,
         { desc = "Open owning .csproj file" }
     )
+    vim.api.nvim_create_user_command(
+        "CSharpExplorerItemProperties",
+        M.item_properties,
+        { desc = "Show contextual item properties floating window" }
+    )
     vim.api.nvim_create_user_command("CSharpExplorerEnable", M.enable, { desc = "Enable C# Solution Explorer" })
     vim.api.nvim_create_user_command("CSharpExplorerDisable", M.disable, { desc = "Disable C# Solution Explorer" })
     vim.api.nvim_create_user_command(
@@ -314,6 +329,10 @@ function M.setup(opts)
             api.events.subscribe(Event.FolderRemoved, on_fs_change)
             api.events.subscribe(Event.NodeRenamed, on_fs_change)
         end
+    end
+
+    if config.current.diagnostics and config.current.diagnostics.enabled ~= false then
+        diagnostics.attach(M)
     end
 end
 

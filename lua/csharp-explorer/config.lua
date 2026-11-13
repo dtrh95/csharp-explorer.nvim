@@ -13,9 +13,14 @@ M.defaults = {
         appsettings = " ",
         dockerfile = "󰡨 ",
         http_file = "󰪹 ",
+        dependencies = "󰆧 ",
+        package_group = "󰏗 ",
+        package = "󰏗 ",
+        project_reference_group = "󰌛 ",
+        project_reference = "󰌛 ",
     },
     filter = {
-        gitignored = true, -- hide gitignored files/folders by default
+        gitignored = true,
     },
     ui = {
         width = 30,
@@ -32,6 +37,7 @@ M.defaults = {
         copy = "c",
         cut = "x",
         paste = "p",
+        open_properties = "P",
         toggle_gitignore = "I",
         expand_all = "E",
         collapse_all = "W",

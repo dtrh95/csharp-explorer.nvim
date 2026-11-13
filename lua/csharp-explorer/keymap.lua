@@ -20,39 +20,42 @@ function M.apply(state)
     local opts = { buffer = state.buf, silent = true }
     local km = config.current.keymaps
 
-    -- Navigation
     bind_keys(km.close, state.toggle, opts)
     bind_keys(km.open, navigation.open_node(state, false), opts)
     bind_keys(km.vsplit, navigation.open_node(state, true), opts)
     bind_keys(km.close_node, navigation.close_node(state), opts)
     bind_keys(km.expand_all, navigation.expand_all(state), opts)
     bind_keys(km.collapse_all, navigation.collapse_all(state), opts)
+    bind_keys(km.open_properties, navigation.open_properties(state), opts)
 
-    -- File operations (proxied to nvim-tree)
     bind_keys(km.create, fs_actions.proxy_fs(state, "create"), opts)
     bind_keys(km.delete, fs_actions.proxy_fs(state, "remove"), opts)
     bind_keys(km.rename, fs_actions.proxy_fs(state, "rename"), opts)
 
-    -- Clipboard operations (standalone)
     bind_keys(km.copy, function()
         local node = navigation.get_node(state)
-        if not node then return end
+        if not node then
+            return
+        end
         clipboard.copy(node)
         renderer.render(state)
     end, opts)
 
     bind_keys(km.cut, function()
         local node = navigation.get_node(state)
-        if not node then return end
+        if not node then
+            return
+        end
         clipboard.cut(node)
         renderer.render(state)
     end, opts)
 
     bind_keys(km.paste, function()
         local node = navigation.get_node(state)
-        if not node then return end
+        if not node then
+            return
+        end
         clipboard.paste(node)
-        -- Trigger tree refresh
         local node_utils = require("csharp-explorer.node")
         node_utils.reset_projects(state.tree)
         renderer.render(state)

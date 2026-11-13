@@ -2,7 +2,15 @@ local uv = vim.uv or vim.loop
 
 local M = {
     _cache = {},
+    _profile_cache = {},
+    _props_cache = {},
 }
+
+function M.clear_cache()
+    M._cache = {}
+    M._profile_cache = {}
+    M._props_cache = {}
+end
 
 function M.normalize_path(path)
     if not path or path == "" then
@@ -428,7 +436,7 @@ function M.invalidate(file_path)
     end
     local norm = M.normalize_path(file_path)
     if norm:match("%.props$") or norm:match("%.targets$") then
-        M._cache = {}
+        M.clear_cache()
         return
     end
 
@@ -443,7 +451,412 @@ function M.invalidate(file_path)
                 M._cache[cached_path] = nil
             end
         end
+        for cached_path, _ in pairs(M._profile_cache) do
+            if vim.startswith(cached_path, dir .. "/") or cached_path == dir or cached_path == norm then
+                M._profile_cache[cached_path] = nil
+            end
+        end
     end
+end
+
+function M.get_project_profile(csproj_path)
+    local norm_path = M.normalize_path(csproj_path)
+    local csproj_stamp = stat_stamp(norm_path)
+
+    local cached = M._profile_cache[norm_path]
+    if cached and cached.csproj_stamp == csproj_stamp then
+        return cached.data
+    end
+
+    local name = vim.fn.fnamemodify(norm_path, ":t:r")
+    local f = io.open(norm_path, "r")
+    if not f then
+        local data = {
+            csproj_path = norm_path,
+            name = name,
+            sdk = "Microsoft.NET.Sdk",
+            output_type = nil,
+            root_namespace = name,
+            target_frameworks = {},
+            is_test_project = false,
+            archetype = "library",
+            explicit_items = {},
+        }
+        M._profile_cache[norm_path] = {
+            csproj_stamp = csproj_stamp,
+            data = data,
+        }
+        return data
+    end
+
+    local raw_content = f:read("*a")
+    f:close()
+    local content = strip_xml_comments(raw_content)
+
+    local sdk = content:match('<Project[^>]-Sdk="([^"]+)"')
+        or content:match('<Sdk%s+Name="([^"]+)"')
+        or "Microsoft.NET.Sdk"
+
+    local output_type = content:match("<OutputType>([^<]+)</OutputType>")
+    if output_type then
+        output_type = vim.trim(output_type)
+    end
+
+    local root_namespace = content:match("<RootNamespace>([^<]+)</RootNamespace>")
+    if root_namespace then
+        root_namespace = vim.trim(root_namespace)
+    end
+
+    local raw_tfm = content:match("<TargetFrameworks>([^<]+)</TargetFrameworks>")
+        or content:match("<TargetFramework>([^<]+)</TargetFramework>")
+
+    if not raw_tfm or not output_type or not root_namespace then
+        local project_dir = vim.fn.fnamemodify(norm_path, ":h")
+        local ancestors = find_ancestor_props(project_dir)
+        for _, prop_file in ipairs(ancestors) do
+            if prop_file:match("Directory%.Build%.props$") then
+                local p_stamp = stat_stamp(prop_file)
+                local cached_p = M._props_cache[prop_file]
+                if not cached_p or cached_p.stamp ~= p_stamp then
+                    local pf = io.open(prop_file, "r")
+                    local parsed = {}
+                    if pf then
+                        local pcontent = strip_xml_comments(pf:read("*a"))
+                        pf:close()
+                        parsed.tfm = pcontent:match("<TargetFrameworks>([^<]+)</TargetFrameworks>")
+                            or pcontent:match("<TargetFramework>([^<]+)</TargetFramework>")
+                        local ot = pcontent:match("<OutputType>([^<]+)</OutputType>")
+                        parsed.output_type = ot and vim.trim(ot) or nil
+                        local rns = pcontent:match("<RootNamespace>([^<]+)</RootNamespace>")
+                        parsed.root_namespace = rns and vim.trim(rns) or nil
+                    end
+                    cached_p = { stamp = p_stamp, data = parsed }
+                    M._props_cache[prop_file] = cached_p
+                end
+                local pd = cached_p.data
+                raw_tfm = raw_tfm or pd.tfm
+                output_type = output_type or pd.output_type
+                root_namespace = root_namespace or pd.root_namespace
+            end
+        end
+    end
+
+    local target_frameworks = {}
+    if raw_tfm then
+        for tfm in raw_tfm:gmatch("[^;%s]+") do
+            table.insert(target_frameworks, tfm)
+        end
+    end
+
+    if not root_namespace or root_namespace == "" then
+        root_namespace = name
+    end
+
+    local is_test = false
+    if
+        content:match(
+            "<[iI][sS][tT][eE][sS][tT][pP][rR][oO][jJ][eE][cC][tT]>%s*[tT][rR][uU][eE]%s*</[iI][sS][tT][eE][sS][tT][pP][rR][oO][jJ][eE][cC][tT]>"
+        )
+    then
+        is_test = true
+    end
+
+    local sdk_lower = sdk:lower()
+    if not is_test and sdk_lower:find("mstest.sdk", 1, true) then
+        is_test = true
+    end
+
+    if not is_test then
+        local test_pkg_patterns = {
+            "^microsoft%.net%.test%.sdk$",
+            "^xunit",
+            "^nunit",
+            "^mstest",
+            "^tunit",
+            "^fixie",
+            "^expecto",
+        }
+        each_xml_element(content, "PackageReference", function(tag_body)
+            if is_test then
+                return
+            end
+            local inc = tag_body:match('Include="([^"]+)"') or tag_body:match('Update="([^"]+)"')
+            if inc then
+                local inc_lower = inc:lower()
+                for _, pat in ipairs(test_pkg_patterns) do
+                    if inc_lower:match(pat) then
+                        is_test = true
+                        break
+                    end
+                end
+            end
+        end)
+    end
+
+    if not is_test then
+        local test_name_patterns = {
+            "%.Tests?$",
+            "%.TestBase$",
+            "%.IntegrationTests$",
+            "%.UnitTests$",
+            "%.FunctionalTests$",
+        }
+        for _, pat in ipairs(test_name_patterns) do
+            if name:match(pat) then
+                is_test = true
+                break
+            end
+        end
+    end
+
+    local archetype
+    if is_test then
+        archetype = "test"
+    elseif
+        sdk_lower:find("microsoft.net.sdk.web", 1, true)
+        or sdk_lower:find("microsoft.net.sdk.blazorwebassembly", 1, true)
+        or sdk_lower:find("microsoft.net.sdk.razor", 1, true)
+    then
+        archetype = "web"
+    elseif
+        (output_type and (output_type:lower() == "exe" or output_type:lower() == "winexe"))
+        or sdk_lower:find("microsoft.net.sdk.worker", 1, true)
+    then
+        archetype = "console"
+    else
+        archetype = "library"
+    end
+
+    local explicit_items = {}
+    local item_tags = { "Compile", "Content", "EmbeddedResource", "Page", "None" }
+    for _, tag in ipairs(item_tags) do
+        each_xml_element(content, tag, function(tag_body)
+            local inc = tag_body:match('Include="([^"]+)"') or tag_body:match('Update="([^"]+)"')
+            if inc and not inc:find("%*") then
+                local norm_inc = M.normalize_path(inc):lower()
+                if vim.startswith(norm_inc, "./") then
+                    norm_inc = norm_inc:sub(3)
+                end
+                if vim.startswith(norm_inc, "/") then
+                    norm_inc = norm_inc:sub(2)
+                end
+                explicit_items[norm_inc] = tag
+            end
+        end)
+    end
+
+    local data = {
+        csproj_path = norm_path,
+        name = name,
+        sdk = sdk,
+        output_type = output_type,
+        root_namespace = root_namespace,
+        target_frameworks = target_frameworks,
+        is_test_project = is_test,
+        archetype = archetype,
+        explicit_items = explicit_items,
+    }
+
+    M._profile_cache[norm_path] = {
+        csproj_stamp = csproj_stamp,
+        data = data,
+    }
+
+    return data
+end
+
+function M.extract_csharp_namespace(file_path, max_lines)
+    if not file_path or file_path == "" then
+        return nil, nil
+    end
+    local f = io.open(file_path, "r")
+    if not f then
+        return nil, nil
+    end
+
+    local limit = max_lines or 120
+    local line_count = 0
+    local in_block_comment = false
+    local pending_ns = nil
+
+    for raw_line in f:lines() do
+        line_count = line_count + 1
+        if line_count > limit then
+            break
+        end
+
+        local line = raw_line
+        if line_count == 1 and vim.startswith(line, "\239\187\191") then
+            line = line:sub(4)
+        end
+
+        while true do
+            if in_block_comment then
+                local end_pos = line:find("%*/")
+                if end_pos then
+                    line = line:sub(end_pos + 2)
+                    in_block_comment = false
+                else
+                    line = ""
+                    break
+                end
+            else
+                local start_pos = line:find("/%*")
+                if start_pos then
+                    local end_pos = line:find("%*/", start_pos + 2)
+                    if end_pos then
+                        line = line:sub(1, start_pos - 1) .. " " .. line:sub(end_pos + 2)
+                    else
+                        line = line:sub(1, start_pos - 1)
+                        in_block_comment = true
+                    end
+                else
+                    break
+                end
+            end
+        end
+
+        local line_comment_pos = line:find("//")
+        if line_comment_pos then
+            line = line:sub(1, line_comment_pos - 1)
+        end
+
+        line = vim.trim(line)
+
+        if line ~= "" then
+            if pending_ns then
+                f:close()
+                return pending_ns, "block-scoped"
+            end
+
+            if
+                not vim.startswith(line, "#")
+                and not line:match("^using%s+")
+                and not line:match("^global%s+using%s+")
+                and not line:match("^%[%s*assembly%s*:")
+                and not line:match("^%[%s*module%s*:")
+            then
+                local ns, sep = line:match("^namespace%s+([%w_%.]+)%s*([;{]?)")
+                if ns then
+                    if sep == ";" then
+                        f:close()
+                        return ns, "file-scoped"
+                    elseif sep == "{" then
+                        f:close()
+                        return ns, "block-scoped"
+                    else
+                        local after = line:match("^namespace%s+[%w_%.]+%s*(.*)$")
+                        if after and vim.startswith(after, ";") then
+                            f:close()
+                            return ns, "file-scoped"
+                        elseif after and vim.startswith(after, "{") then
+                            f:close()
+                            return ns, "block-scoped"
+                        else
+                            pending_ns = ns
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    f:close()
+    if pending_ns then
+        return pending_ns, "block-scoped"
+    end
+    return nil, nil
+end
+
+function M.infer_expected_namespace(file_path, project_node)
+    if not file_path or file_path == "" then
+        return nil
+    end
+    local root_ns = nil
+    if project_node then
+        if project_node._path then
+            local profile = M.get_project_profile(project_node._path)
+            root_ns = profile.root_namespace
+        end
+        if not root_ns or root_ns == "" then
+            root_ns = project_node._name
+        end
+    end
+    if not root_ns or root_ns == "" then
+        return nil
+    end
+
+    if not project_node or not project_node._dir then
+        return root_ns
+    end
+
+    local proj_dir = M.normalize_path(project_node._dir)
+    local file_dir = M.normalize_path(vim.fn.fnamemodify(file_path, ":h"))
+
+    if file_dir == proj_dir then
+        return root_ns
+    end
+
+    if vim.startswith(file_dir:lower(), proj_dir:lower() .. "/") then
+        local rel_dir = file_dir:sub(#proj_dir + 2)
+        local segments = {}
+        for seg in rel_dir:gmatch("[^/]+") do
+            local clean_seg = seg:gsub("[^%w_]", "_")
+            if clean_seg ~= "" then
+                table.insert(segments, clean_seg)
+            end
+        end
+        if #segments > 0 then
+            return root_ns .. "." .. table.concat(segments, ".")
+        end
+    end
+
+    return root_ns
+end
+
+function M.resolve_build_action(file_path, project_node)
+    if not file_path or file_path == "" then
+        return "None"
+    end
+    local norm_path = M.normalize_path(file_path)
+
+    if project_node and project_node._path and project_node._dir then
+        local norm_dir = M.normalize_path(project_node._dir)
+        if vim.startswith(norm_path:lower(), norm_dir:lower() .. "/") then
+            local rel = norm_path:sub(#norm_dir + 2):lower()
+            local profile = M.get_project_profile(project_node._path)
+            if profile and profile.explicit_items and profile.explicit_items[rel] then
+                return profile.explicit_items[rel]
+            end
+        end
+    end
+
+    if norm_path:match("%.cs$") then
+        return "Compile"
+    elseif norm_path:match("%.resx$") then
+        return "EmbeddedResource"
+    elseif norm_path:match("%.xaml$") then
+        return "Page"
+    elseif norm_path:match("%.razor$") or norm_path:match("%.cshtml$") then
+        return "Content"
+    end
+
+    local fname = vim.fn.fnamemodify(norm_path, ":t"):lower()
+    if fname:match("^appsettings.*%.json$") then
+        return "Content"
+    end
+
+    if norm_path:match("%.css$") then
+        if project_node and project_node._path then
+            local profile = M.get_project_profile(project_node._path)
+            if profile and profile.archetype == "web" then
+                return "Content"
+            end
+        end
+        return "None"
+    end
+
+    return "None"
 end
 
 function M.find_owning_project(file_path, tree)

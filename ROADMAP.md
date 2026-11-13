@@ -6,13 +6,13 @@ This roadmap outlines the journey of `csharp-explorer.nvim` toward achieving fea
 
 _Focus: Visibility into what makes up a project beyond just source files._
 
-- [ ] **NuGet Package Integration**:
+- [x] **NuGet Package Integration**:
   - Display a "Packages" node under each project.
   - List installed NuGet packages and versions.
-- [ ] **Project References**:
+- [x] **Project References**:
   - Display a "Dependencies" or "References" node.
   - Show links to other projects in the solution.
-- [ ] **Project Properties Access**:
+- [x] **Project Properties Access**:
   - Quick shortcut to open the `.csproj` file for editing.
 
 ## Phase 2: Enhanced UI & Visual Feedback 🎨
@@ -22,7 +22,7 @@ _Focus: Bringing the richness of IDE trees to the Neovim buffer._
 - [ ] **Diagnostic Signs**:
   - Show error/warning icons next to files/projects (integrated with `vim.diagnostic`).
 - [ ] **File Nesting**:
-  - Logic to group related files (e.g., `App.xaml` → `App.xaml.cs`).
+  - Logic to group related files (e.g., `App.xaml` -> `App.xaml.cs`).
 - [ ] **Dynamic Icon Themes**:
   - Support for project-specific icons (Web, Console, Library, Test).
 - [ ] **Item Metadata (Properties Window)**:
@@ -54,4 +54,4 @@ _Focus: Deep integration with LSP and build tools._
 
 ## Progress Tracking
 
-We are currently in **Phase 0 (Foundation)**: Basic SLN/SLNX parsing and file system proxying.
+Completed **Phase 0 (Foundation)** and **Phase 1 (Project Metadata & Dependencies)**. Next up is **Phase 2 (Enhanced UI & Visual Feedback)**.

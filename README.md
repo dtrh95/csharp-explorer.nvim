@@ -1,18 +1,20 @@
 # csharp-explorer.nvim
 
-A lightweight, efficient C# Solution Explorer for Neovim that bridges the gap between `csharp_ls` and `nvim-tree.lua`.
+A lightweight C# Solution Explorer for Neovim that renders `.sln` and `.slnx` hierarchies and integrates with `nvim-tree.lua`.
 
 [![Video](https://github.com/user-attachments/assets/a026d7b2-978f-4cbf-af6c-c3a84d76030c)](https://github.com/user-attachments/assets/dd0c0cf4-1b53-446e-aa7a-66aadf7a78cb)
 
 ## Features
 
-- **Solution & Project Parsing**: Supports both legacy `.sln` and the modern XML-based `.slnx` files, automatically rendering independently of the LSP.
-- **File Parsing Integration**: Provides fully native parsing, navigation, opening, and interaction mapping for C# files, `appsettings*.json`, `Dockerfile`, and `.http` files inside of the project.
-- **Nvim-Tree Integration**: Proxies file system operations (create, rename, delete) to `nvim-tree.lua` for a consistent experience.
-- **Directory Behaviors**: Nvim-tree style chevron markers and full expand all / collapse all tree manipulation commands.
-- **Finding Files**: Quickly locate the current buffer in the solution tree using `CSharpExplorerFindFile`.
-- **Gitignore Filtering**: Toggle visibility of gitignored files.
-- **Custom Clipboard**: Standalone copy/cut/paste functionality specifically for C# project items.
+- **Solution & Project Parsing**: Parses both classic `.sln` and XML `.slnx` solutions directly without waiting for an LSP server.
+- **Dependencies Tree**: Pins a virtual `Dependencies` node at the top of each expanded project with `Packages` (direct NuGet packages and resolved versions) and `Projects` (project-to-project references), backed by `obj/project.assets.json` and an MSBuild XML fallback (`Directory.Packages.props`, `Directory.Build.props`, and `<Import>`).
+- **Project Reference Navigation**: Press `<CR>` on an in-solution project reference to reveal and jump to that project in the explorer, or press `<C-v>` (and `<CR>` on external references) to open the target `.csproj` in the editor.
+- **Project Properties Shortcut**: Press `P` in the explorer or run `:CSharpExplorerOpenProperties` from any C# buffer to edit the owning `.csproj` file.
+- **File Parsing Integration**: Displays C# source files, `appsettings*.json`, `Dockerfile`, and `.http` files inside each project.
+- **Nvim-Tree Integration**: Proxies create, rename, and delete actions to `nvim-tree.lua` while blocking destructive edits on virtual metadata nodes.
+- **Live Metadata Sync**: Refreshes dependency nodes automatically on `BufWritePost` for `*.csproj`, `*.props`, `*.targets`, and `project.assets.json` while keeping expanded folders open.
+- **Finding Files**: Locate the active source buffer or `.csproj` in the solution tree with `:CSharpExplorerFindFile`.
+- **Gitignore Filtering & Clipboard**: Toggle gitignored files with `I` and copy, cut, or paste project files directly in the tree.
 
 ## Prerequisites
 
@@ -26,15 +28,13 @@ Using [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 ```lua
 {
-    "dtrh95/csharp-explorer.nvim", -- Replace with your actual repo
+    "dtrh95/csharp-explorer.nvim",
     dependencies = {
         "nvim-tree/nvim-tree.lua",
         "nvim-tree/nvim-web-devicons",
     },
     config = function()
-        require("csharp-explorer").setup({
-            -- your configuration here
-        })
+        require("csharp-explorer").setup({})
     end,
 }
 ```
@@ -57,6 +57,11 @@ require("csharp-explorer").setup({
         appsettings = " ",
         dockerfile = "󰡨 ",
         http_file = "󰪹 ",
+        dependencies = "󰆧 ",
+        package_group = "󰏗 ",
+        package = "󰏗 ",
+        project_reference_group = "󰌛 ",
+        project_reference = "󰌛 ",
     },
     filter = {
         gitignored = true,
@@ -76,48 +81,45 @@ require("csharp-explorer").setup({
         copy = "c",
         cut = "x",
         paste = "p",
+        open_properties = "P",
         toggle_gitignore = "I",
         expand_all = "E",
         collapse_all = "W",
-    }
+    },
 })
 ```
 
 ## Commands
 
-- `:CSharpExplorer`: Toggle the solution explorer.
-- `:CSharpExplorerFindFile`: Reveal current file in the explorer.
-- `:CSharpExplorerTogglePlugin`: Toggle this plugin
-- `:CSharpExplorerRefresh`: Refresh the solution tree
-- `:CSharpExplorerExpandAll`: Expand all folders across the solution.
-- `:CSharpExplorerCollapseAll`: Collapse all folders across the solution.
+- `:CSharpExplorer` / `:CSharpExplorerToggle`: Toggle the solution explorer window.
+- `:CSharpExplorerFindFile`: Reveal the active source file or `.csproj` in the explorer.
+- `:CSharpExplorerOpenProperties`: Open the owning `.csproj` for the focused explorer node or active buffer.
+- `:CSharpExplorerEnable` / `:CSharpExplorerDisable` / `:CSharpExplorerTogglePlugin`: Enable, disable, or toggle plugin state.
+- `:CSharpExplorerRefresh`: Re-parse the solution and refresh expanded nodes.
+- `:CSharpExplorerExpandAll`: Expand all solution and project folders.
+- `:CSharpExplorerCollapseAll`: Collapse all nodes below the solution root.
 
 ## Events
 
-You can hook into plugin enablement state changes by listening to these Neovim `User` autocommands:
-
-- `CSharpExplorerEnable`: Fired when the plugin is explicitly enabled.
-- `CSharpExplorerDisable`: Fired when the plugin is disabled.
-
-Example usage:
+Listen to Neovim `User` autocommands to react when the plugin is enabled or disabled:
 
 ```lua
 vim.api.nvim_create_autocmd("User", {
     pattern = "CSharpExplorerEnable",
     callback = function()
-        print("CSharpExplorer is now active!")
+        print("CSharpExplorer is active")
     end,
 })
 ```
 
 ## Roadmap
 
-We aim to achieve feature parity with IDE-like solution trees (Visual Studio/Rider). See our detailed [ROADMAP.md](ROADMAP.md) for more details.
+See [ROADMAP.md](ROADMAP.md) for completed and upcoming milestones.
 
 ## Development
 
-- **Formatting**: This project uses [StyLua](https://github.com/JohnnyMorganz/StyLua) for code formatting. A `.stylua.toml` is provided in the root.
-- **Linting**: We recommend using `luacheck` for static analysis.
+- **Formatting**: Format Lua sources with `stylua lua/ --config-path .stylua.toml`.
+- **Linting**: Check static diagnostics with `luacheck lua/ --config .luacheckrc`.
 
 ## License
 

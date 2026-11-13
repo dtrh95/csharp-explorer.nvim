@@ -1,5 +1,6 @@
 local config = require("csharp-explorer.config")
 local navigation = require("csharp-explorer.actions.navigation")
+local properties = require("csharp-explorer.actions.properties")
 local fs_actions = require("csharp-explorer.actions.fs")
 local clipboard = require("csharp-explorer.actions.clipboard")
 local renderer = require("csharp-explorer.renderer")
@@ -48,6 +49,9 @@ function M.apply(state)
     bind_keys(km.expand_all, navigation.expand_all(state), opts)
     bind_keys(km.collapse_all, navigation.collapse_all(state), opts)
     bind_keys(km.open_properties, navigation.open_properties(state), opts)
+    if km.item_properties then
+        bind_keys(km.item_properties, properties.open(state), opts)
+    end
 
     bind_keys(km.create, fs_actions.proxy_fs(state, "create"), opts)
     bind_keys(km.delete, fs_actions.proxy_fs(state, "remove"), opts)

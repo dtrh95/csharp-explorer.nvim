@@ -3,7 +3,8 @@ local navigation = require("csharp-explorer.actions.navigation")
 local M = {}
 
 local function get_nvim_tree_mock_node(node)
-    if not node then
+    if not node or node._virtual then
+        vim.notify("Virtual metadata nodes cannot be modified on disk", vim.log.levels.WARN)
         return nil
     end
     local is_file = not node._has_children
@@ -28,7 +29,7 @@ local function get_nvim_tree_mock_node(node)
         absolute_path = path,
         name = node._name,
         type = is_file and "file" or "directory",
-        is = function(self, cls)
+        is = function(_, cls)
             if is_file and cls == FileNode then
                 return true
             end
@@ -37,7 +38,7 @@ local function get_nvim_tree_mock_node(node)
             end
             return false
         end,
-        as = function(self, cls)
+        as = function(self)
             return self
         end,
         last_group_node = function(self)
@@ -50,7 +51,7 @@ local function get_nvim_tree_mock_node(node)
             last_group_node = function(s)
                 return s
             end,
-            is = function(self, cls)
+            is = function(_, cls)
                 return cls == DirectoryNode
             end,
             as = function(s)
@@ -99,6 +100,12 @@ function M.proxy_fs(state, action_path)
         if not node then
             return
         end
+
+        if node._virtual then
+            vim.notify("Virtual metadata nodes cannot be modified on disk", vim.log.levels.WARN)
+            return
+        end
+
         if node._type == "solution" or node._type == "project" then
             if action_path == "remove" or action_path == "rename" then
                 vim.notify("Cannot modify project root nodes from Explorer", vim.log.levels.WARN)

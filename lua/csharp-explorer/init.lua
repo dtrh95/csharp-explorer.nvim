@@ -4,6 +4,8 @@ local sln_parser = require("csharp-explorer.parser.sln")
 local node_utils = require("csharp-explorer.node")
 local renderer = require("csharp-explorer.renderer")
 local keymap = require("csharp-explorer.keymap")
+local navigation = require("csharp-explorer.actions.navigation")
+local metadata = require("csharp-explorer.metadata")
 
 local M = {}
 
@@ -12,6 +14,27 @@ M.win = nil
 M.tree = nil
 M.is_active = false
 M.config = config.current
+
+local function parse_workspace_solution(root_dir)
+    local slnx_files = vim.fn.glob(root_dir .. "/*.slnx", false, true)
+    local sln_files = vim.fn.glob(root_dir .. "/*.sln", false, true)
+
+    if #slnx_files > 0 then
+        return slnx_parser.parse(root_dir, slnx_files[1])
+    elseif #sln_files > 0 then
+        return sln_parser.parse(root_dir, sln_files[1])
+    end
+    return nil
+end
+
+function M.ensure_tree()
+    local root_dir = vim.fn.getcwd()
+    if not M.tree or M._root_dir ~= root_dir then
+        M.tree = parse_workspace_solution(root_dir)
+        M._root_dir = root_dir
+    end
+    return M.tree
+end
 
 function M.enable()
     config.current.enabled = true
@@ -49,20 +72,11 @@ function M.toggle()
         return
     end
 
-    local root_dir = vim.fn.getcwd()
-    local slnx_files = vim.fn.glob(root_dir .. "/*.slnx", false, true)
-    local sln_files = vim.fn.glob(root_dir .. "/*.sln", false, true)
-
-    if #slnx_files > 0 then
-        M.tree = slnx_parser.parse(root_dir, slnx_files[1])
-    elseif #sln_files > 0 then
-        M.tree = sln_parser.parse(root_dir, sln_files[1])
-    else
+    if not M.ensure_tree() then
         vim.notify("No .slnx or .sln found", vim.log.levels.WARN)
         return
     end
 
-    -- Close nvim-tree if it is open
     pcall(function()
         require("nvim-tree.api").tree.close()
     end)
@@ -77,7 +91,6 @@ function M.toggle()
 
     M.buf = vim.api.nvim_create_buf(false, true)
 
-    -- Use silent modifiers to suppress the W10 warning when creating the buffer/window
     vim.cmd("silent! topleft " .. width .. "vsplit")
     M.win = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_buf(M.win, M.buf)
@@ -92,11 +105,9 @@ function M.toggle()
     vim.bo[M.buf].buftype = "nofile"
     vim.bo[M.buf].swapfile = false
     vim.bo[M.buf].bufhidden = "wipe"
-    -- set modifiable to false FIRST, then readonly
     vim.bo[M.buf].modifiable = false
-    vim.cmd("silent! setlocal readonly")
+    vim.bo[M.buf].readonly = true
 
-    -- Disable completion engines in this buffer
     pcall(function()
         require("blink.cmp").setup_buffer(M.buf, { enabled = false })
     end)
@@ -104,7 +115,6 @@ function M.toggle()
         require("cmp").setup.buffer({ enabled = false })
     end)
 
-    -- Bind keymaps
     keymap.apply(M)
 
     renderer.render(M)
@@ -121,7 +131,7 @@ function M.find_file()
     if target_path == "" then
         return
     end
-    target_path = target_path:gsub("\\", "/")
+    local target_lower = metadata.normalize_path(target_path):lower()
 
     if not M.is_active or not M.tree then
         M.toggle()
@@ -132,25 +142,31 @@ function M.find_file()
     end
 
     local function search_node(node)
+        if node._type == "project" and node._path and metadata.normalize_path(node._path):lower() == target_lower then
+            return true
+        end
+
         if not node._has_children then
-            if node._path == target_path then
-                return true
-            end
-            return false
-        elseif node._type == "project" then
-            if vim.startswith(target_path, node._dir .. "/") or target_path == node._dir then
+            return node._path and metadata.normalize_path(node._path):lower() == target_lower
+        end
+
+        if node._type == "project" then
+            local proj_dir_lower = metadata.normalize_path(node._dir):lower()
+            if vim.startswith(target_lower, proj_dir_lower .. "/") or target_lower == proj_dir_lower then
                 if not node._cs_loaded then
                     node_utils.populate_cs_files(node)
                 end
                 for _, child in pairs(node._children) do
-                    if search_node(child) then
+                    if not child._virtual and search_node(child) then
                         node._expanded = true
                         return true
                     end
                 end
             end
             return false
-        elseif node._type == "folder" or node._type == "solution" then
+        end
+
+        if node._type == "folder" or node._type == "solution" then
             for _, child in pairs(node._children) do
                 if search_node(child) then
                     node._expanded = true
@@ -159,6 +175,7 @@ function M.find_file()
             end
             return false
         end
+
         return false
     end
 
@@ -166,7 +183,7 @@ function M.find_file()
     if found then
         renderer.render(M)
         for line_num, node in pairs(renderer.line_to_node) do
-            if node._path == target_path then
+            if node._path and metadata.normalize_path(node._path):lower() == target_lower then
                 vim.api.nvim_set_current_win(M.win)
                 vim.api.nvim_win_set_cursor(M.win, { line_num, 0 })
                 vim.cmd("normal! zz")
@@ -176,6 +193,10 @@ function M.find_file()
     else
         vim.notify("File not found in C# Solution", vim.log.levels.WARN)
     end
+end
+
+function M.open_properties()
+    navigation.open_properties(M)()
 end
 
 function M.toggle_gitignore()
@@ -195,17 +216,14 @@ function M.refresh()
         return
     end
 
-    local root_dir = vim.fn.getcwd()
-    local slnx_files = vim.fn.glob(root_dir .. "/*.slnx", false, true)
-    local sln_files = vim.fn.glob(root_dir .. "/*.sln", false, true)
+    local snapshot = node_utils.snapshot_tree_expansion(M.tree)
+    metadata._cache = {}
 
-    if #slnx_files > 0 then
-        M.tree = slnx_parser.parse(root_dir, slnx_files[1])
-    elseif #sln_files > 0 then
-        M.tree = sln_parser.parse(root_dir, sln_files[1])
+    local fresh_tree = parse_workspace_solution(vim.fn.getcwd())
+    if fresh_tree then
+        node_utils.restore_tree_expansion(fresh_tree, snapshot)
+        M.tree = fresh_tree
     end
-
-    node_utils.reset_projects(M.tree)
 
     if M.is_active and M.buf and vim.api.nvim_buf_is_valid(M.buf) then
         renderer.render(M)
@@ -215,13 +233,17 @@ function M.refresh()
 end
 
 function M.expand_all()
-    if not M.is_active or not M.tree then return end
-    require("csharp-explorer.actions.navigation").expand_all(M)()
+    if not M.is_active or not M.tree then
+        return
+    end
+    navigation.expand_all(M)()
 end
 
 function M.collapse_all()
-    if not M.is_active or not M.tree then return end
-    require("csharp-explorer.actions.navigation").collapse_all(M)()
+    if not M.is_active or not M.tree then
+        return
+    end
+    navigation.collapse_all(M)()
 end
 
 function M.setup(opts)
@@ -229,10 +251,16 @@ function M.setup(opts)
     M.config = config.current
 
     vim.api.nvim_create_user_command("CSharpExplorer", M.toggle, { desc = "Toggle C# Solution Explorer" })
+    vim.api.nvim_create_user_command("CSharpExplorerToggle", M.toggle, { desc = "Toggle the CSharpExplorer tree" })
     vim.api.nvim_create_user_command(
         "CSharpExplorerFindFile",
         M.find_file,
-        { desc = "Find current C# file in Explorer" }
+        { desc = "Find current C# file or .csproj in Explorer" }
+    )
+    vim.api.nvim_create_user_command(
+        "CSharpExplorerOpenProperties",
+        M.open_properties,
+        { desc = "Open owning .csproj file" }
     )
     vim.api.nvim_create_user_command("CSharpExplorerEnable", M.enable, { desc = "Enable C# Solution Explorer" })
     vim.api.nvim_create_user_command("CSharpExplorerDisable", M.disable, { desc = "Disable C# Solution Explorer" })
@@ -242,14 +270,35 @@ function M.setup(opts)
         { desc = "Toggle C# Solution Explorer Plugin" }
     )
     vim.api.nvim_create_user_command("CSharpExplorerRefresh", M.refresh, { desc = "Refresh C# Solution Explorer" })
-    vim.api.nvim_create_user_command("CSharpExplorerExpandAll", M.expand_all, { desc = "Expand All in C# Solution Explorer" })
-    vim.api.nvim_create_user_command("CSharpExplorerCollapseAll", M.collapse_all, { desc = "Collapse All in C# Solution Explorer" })
-    vim.api.nvim_create_user_command("CSharpExplorerToggle", M.toggle, { desc = "Toggle the CSharpExplorer tree" })
-    vim.api.nvim_create_user_command("CSharpExplorerFindFile", M.find_file, { desc = "Expose current file in solution tree" })
+    vim.api.nvim_create_user_command(
+        "CSharpExplorerExpandAll",
+        M.expand_all,
+        { desc = "Expand All in C# Solution Explorer" }
+    )
+    vim.api.nvim_create_user_command(
+        "CSharpExplorerCollapseAll",
+        M.collapse_all,
+        { desc = "Collapse All in C# Solution Explorer" }
+    )
 
-    -- Subscribe to nvim-tree file events to auto-refresh project trees
     if not M._events_bound then
         M._events_bound = true
+
+        local augroup = vim.api.nvim_create_augroup("CSharpExplorerLiveSync", { clear = true })
+        vim.api.nvim_create_autocmd("BufWritePost", {
+            group = augroup,
+            pattern = { "*.csproj", "*.props", "*.targets", "project.assets.json" },
+            callback = function(ev)
+                metadata.invalidate(ev.file)
+                if M.tree then
+                    node_utils.reset_projects(M.tree)
+                    if M.is_active and M.buf and vim.api.nvim_buf_is_valid(M.buf) then
+                        renderer.render(M)
+                    end
+                end
+            end,
+        })
+
         local ok_api, api = pcall(require, "nvim-tree.api")
         if ok_api and api.events then
             local function on_fs_change()

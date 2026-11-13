@@ -12,11 +12,15 @@ local function clear_list(list)
 end
 
 function M.cut(node)
-    local path = node._path or node._dir
-    if not path then
-        vim.notify("Cannot cut virtual nodes", vim.log.levels.WARN)
+    if node._virtual or (not node._path and not node._dir) then
+        vim.notify("Cannot cut virtual metadata nodes", vim.log.levels.WARN)
         return
     end
+    if node._type == "solution" or node._type == "project" then
+        vim.notify("Cannot cut solution or project root nodes", vim.log.levels.WARN)
+        return
+    end
+    local path = node._path or node._dir
     M.copy_list[path] = nil
     if M.cut_list[path] then
         M.cut_list[path] = nil
@@ -32,11 +36,11 @@ function M.cut(node)
 end
 
 function M.copy(node)
-    local path = node._path or node._dir
-    if not path then
-        vim.notify("Cannot copy virtual nodes", vim.log.levels.WARN)
+    if node._virtual or (not node._path and not node._dir) then
+        vim.notify("Cannot copy virtual metadata nodes", vim.log.levels.WARN)
         return
     end
+    local path = node._path or node._dir
     M.cut_list[path] = nil
     if M.copy_list[path] then
         M.copy_list[path] = nil
@@ -101,13 +105,18 @@ local function resolve_dest_dir(dest_node)
 end
 
 function M.paste(dest_node)
+    if dest_node._virtual then
+        vim.notify("Cannot paste into virtual metadata nodes", vim.log.levels.WARN)
+        return
+    end
+
     local dest_dir = resolve_dest_dir(dest_node)
     if not dest_dir then
         vim.notify("Cannot determine paste destination", vim.log.levels.WARN)
         return
     end
 
-    local action = nil
+    local action
     local items = {}
 
     if next(M.cut_list) then

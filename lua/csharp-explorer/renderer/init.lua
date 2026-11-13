@@ -43,21 +43,26 @@ function M.render(state)
         elseif node._type == "project" then
             icon = config.current.icons.project
             hl = "Type"
-        elseif node._type == "cs_file" then
-            icon = config.current.icons.cs_file
+        elseif
+            node._type == "cs_file"
+            or node._type == "appsettings"
+            or node._type == "dockerfile"
+            or node._type == "http_file"
+        then
+            icon = config.current.icons[node._type]
             hl = "String"
-        elseif node._type == "appsettings" then
-            icon = config.current.icons.appsettings
-            hl = "String"
-        elseif node._type == "dockerfile" then
-            icon = config.current.icons.dockerfile
-            hl = "String"
-        elseif node._type == "http_file" then
-            icon = config.current.icons.http_file
-            hl = "String"
+        elseif node._type == "dependencies" then
+            icon = config.current.icons.dependencies
+            hl = "Directory"
+        elseif node._type == "package_group" or node._type == "package" then
+            icon = config.current.icons[node._type]
+            hl = "Special"
+        elseif node._type == "project_reference_group" or node._type == "project_reference" then
+            icon = config.current.icons[node._type]
+            hl = "Type"
         end
 
-        local arrow = ""
+        local arrow
         if node._has_children then
             arrow = node._expanded and config.current.icons.arrow_open or config.current.icons.arrow_closed
         else
@@ -73,8 +78,13 @@ function M.render(state)
         table.insert(hl_map, { line = #lines - 1, col_start = col_start, col_end = col_start + #icon, hl = hl })
 
         if node._expanded and node._has_children then
-            if node._type == "project" and not node._cs_loaded then
-                node_utils.populate_cs_files(node)
+            if node._type == "project" then
+                if not node._cs_loaded then
+                    node_utils.populate_cs_files(node)
+                end
+                if not node._meta_loaded then
+                    node_utils.populate_dependencies(node, state.tree)
+                end
             end
 
             local keys = {}
@@ -82,15 +92,14 @@ function M.render(state)
                 table.insert(keys, k)
             end
             table.sort(keys, function(a, b)
-                local nodeA = node._children[a]
-                local nodeB = node._children[b]
-                if nodeA._type == "folder" and nodeB._type ~= "folder" then
-                    return true
+                local node_a = node._children[a]
+                local node_b = node._children[b]
+                local prio_a = node_utils.get_priority(node_a)
+                local prio_b = node_utils.get_priority(node_b)
+                if prio_a ~= prio_b then
+                    return prio_a < prio_b
                 end
-                if nodeB._type == "folder" and nodeA._type ~= "folder" then
-                    return false
-                end
-                return a < b
+                return a:lower() < b:lower()
             end)
 
             for _, k in ipairs(keys) do

@@ -53,9 +53,19 @@ function M.get_scope(state)
         or vim.fn.getcwd()
     sol_dir = metadata.normalize_path(sol_dir)
 
-    local project_dirs = node_utils.get_solution_project_dirs(tree)
+    local raw_project_dirs = node_utils.get_solution_project_dirs(tree)
+    local project_dirs = {}
+    for _, dir in ipairs(raw_project_dirs) do
+        local st = uv.fs_stat(dir)
+        if st and st.type == "directory" then
+            project_dirs[#project_dirs + 1] = dir
+        end
+    end
     if #project_dirs == 0 then
-        project_dirs = { sol_dir }
+        local st = sol_dir and uv.fs_stat(sol_dir)
+        if st and st.type == "directory" then
+            project_dirs = { sol_dir }
+        end
     end
 
     local sorted = vim.deepcopy(project_dirs)
@@ -256,6 +266,57 @@ local function jump_to_location(state, file, line, col)
     pcall(vim.api.nvim_win_set_cursor, 0, { line or 1, math.max((col or 1) - 1, 0) })
 end
 
+local function run_rg_vimgrep(query, roots)
+    if #roots == 0 then
+        return {}
+    end
+
+    local cmd = {
+        "rg",
+        "--vimgrep",
+        "--smart-case",
+        "--no-messages",
+        "-g",
+        "!**/bin/**",
+        "-g",
+        "!**/obj/**",
+        "-g",
+        "!**/.git/**",
+        "-g",
+        "!**/node_modules/**",
+        "-e",
+        query,
+    }
+    for _, r in ipairs(roots) do
+        cmd[#cmd + 1] = r
+    end
+
+    local stdout
+    if vim.system then
+        local res = vim.system(cmd, { text = true }):wait()
+        stdout = res and res.stdout or ""
+    else
+        stdout = vim.fn.system(cmd) or ""
+    end
+
+    local qf_items = {}
+    if stdout ~= "" then
+        for line in stdout:gmatch("[^\r\n]+") do
+            local fn, lnum, col, txt = line:match("^([^:]+):(%d+):(%d+):(.*)$")
+            if fn and not vim.startswith(fn, "rg:") then
+                qf_items[#qf_items + 1] = {
+                    filename = fn,
+                    lnum = tonumber(lnum),
+                    col = tonumber(col),
+                    text = txt,
+                }
+            end
+        end
+    end
+
+    return qf_items
+end
+
 function M.files(state, opts)
     opts = opts or {}
     local scope = M.get_scope(state)
@@ -267,11 +328,21 @@ function M.files(state, opts)
         return files
     end
 
+    if #scope.search_roots == 0 then
+        vim.notify("No existing project directories found in solution", vim.log.levels.WARN)
+        return
+    end
+
     if picker == "fzf-lua" then
         navigation.focus_editor_window(state)
         require("fzf-lua").files({
+            cmd = false,
+            silent = true,
+            stderr = false,
+            stderr_to_stdout = false,
             search_paths = scope.search_roots,
-            rg_opts = "--color=never --files --hidden --follow -g '!.git' -g '!**/bin/**' -g '!**/obj/**' -g '!**/node_modules/**'",
+            rg_opts = "--color=never --files --hidden --follow --no-messages -g '!.git' -g '!**/bin/**' -g '!**/obj/**' -g '!**/node_modules/**'",
+            fd_opts = "--color=never --type f --type l --hidden --follow --exclude .git --exclude bin --exclude obj --exclude node_modules",
         })
         return
     elseif picker == "snacks" then
@@ -323,38 +394,7 @@ function M.grep(state, opts)
         local qf_items = {}
         if opts.query and opts.query ~= "" then
             if vim.fn.executable("rg") == 1 then
-                local cmd = {
-                    "rg",
-                    "--vimgrep",
-                    "--smart-case",
-                    "-g",
-                    "!**/bin/**",
-                    "-g",
-                    "!**/obj/**",
-                    "-g",
-                    "!**/.git/**",
-                    "-g",
-                    "!**/node_modules/**",
-                    "--",
-                    opts.query,
-                }
-                for _, r in ipairs(scope.search_roots) do
-                    cmd[#cmd + 1] = r
-                end
-                local res = vim.fn.system(cmd)
-                if vim.v.shell_error == 0 and res ~= "" then
-                    for line in res:gmatch("[^\r\n]+") do
-                        local fn, lnum, col, txt = line:match("^([^:]+):(%d+):(%d+):(.*)$")
-                        if fn then
-                            qf_items[#qf_items + 1] = {
-                                filename = fn,
-                                lnum = tonumber(lnum),
-                                col = tonumber(col),
-                                text = txt,
-                            }
-                        end
-                    end
-                end
+                qf_items = run_rg_vimgrep(opts.query, scope.search_roots)
             else
                 local sfiles = M.collect_solution_files(scope)
                 for _, fp in ipairs(sfiles) do
@@ -383,12 +423,21 @@ function M.grep(state, opts)
         return qf_items
     end
 
+    if #scope.search_roots == 0 then
+        vim.notify("No existing project directories found in solution", vim.log.levels.WARN)
+        return
+    end
+
     if picker == "fzf-lua" then
         navigation.focus_editor_window(state)
         require("fzf-lua").live_grep({
+            cmd = false,
+            silent = true,
+            stderr = false,
+            stderr_to_stdout = false,
             search_paths = scope.search_roots,
             search = opts.query,
-            rg_opts = "--column --line-number --no-heading --color=always --smart-case -g '!**/bin/**' -g '!**/obj/**' -g '!**/.git/**' -g '!**/node_modules/**'",
+            rg_opts = "--column --line-number --no-heading --color=always --smart-case --no-messages --max-columns=4096 -g '!**/bin/**' -g '!**/obj/**' -g '!**/.git/**' -g '!**/node_modules/**' -e",
         })
         return
     elseif picker == "snacks" then
@@ -404,6 +453,7 @@ function M.grep(state, opts)
         require("telescope.builtin").live_grep({
             search_dirs = scope.search_roots,
             default_text = opts.query,
+            additional_args = { "--no-messages" },
         })
         return
     end
@@ -414,38 +464,7 @@ function M.grep(state, opts)
         end
         local qf_items = {}
         if vim.fn.executable("rg") == 1 then
-            local cmd = {
-                "rg",
-                "--vimgrep",
-                "--smart-case",
-                "-g",
-                "!**/bin/**",
-                "-g",
-                "!**/obj/**",
-                "-g",
-                "!**/.git/**",
-                "-g",
-                "!**/node_modules/**",
-                "--",
-                q,
-            }
-            for _, r in ipairs(scope.search_roots) do
-                cmd[#cmd + 1] = r
-            end
-            local res = vim.fn.system(cmd)
-            if res ~= "" then
-                for line in res:gmatch("[^\r\n]+") do
-                    local fn, lnum, col, txt = line:match("^([^:]+):(%d+):(%d+):(.*)$")
-                    if fn then
-                        qf_items[#qf_items + 1] = {
-                            filename = fn,
-                            lnum = tonumber(lnum),
-                            col = tonumber(col),
-                            text = txt,
-                        }
-                    end
-                end
-            end
+            qf_items = run_rg_vimgrep(q, scope.search_roots)
         else
             local sfiles = M.collect_solution_files(scope)
             for _, fp in ipairs(sfiles) do
@@ -500,6 +519,11 @@ function M.symbols(state, opts)
     if opts.on_results then
         opts.on_results(syms)
         return syms
+    end
+
+    if #scope.search_roots == 0 then
+        vim.notify("No existing project directories found in solution", vim.log.levels.WARN)
+        return
     end
 
     local picker = opts.picker or M.resolve_picker()

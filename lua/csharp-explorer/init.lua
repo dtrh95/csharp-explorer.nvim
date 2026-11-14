@@ -106,6 +106,7 @@ function M.toggle()
     end
 
     M.buf = vim.api.nvim_create_buf(false, true)
+    vim.bo[M.buf].undolevels = -1
 
     vim.cmd("silent! topleft " .. width .. "vsplit")
     M.win = vim.api.nvim_get_current_win()
@@ -515,7 +516,10 @@ function M.setup(opts)
             end,
         })
 
-        require("csharp-explorer.process").subscribe(function()
+        require("csharp-explorer.process").subscribe(function(event_type)
+            if event_type == "output" then
+                return
+            end
             if M.is_active and M.buf and vim.api.nvim_buf_is_valid(M.buf) then
                 renderer.render_process_badges(M)
             end

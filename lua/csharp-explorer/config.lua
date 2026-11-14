@@ -65,6 +65,14 @@ M.defaults = {
         max_width = 76,
         max_scan_lines = 120,
     },
+    orchestration = {
+        dotnet_cmd = nil,
+        file_scoped_namespaces = true,
+        open_quickfix_on_error = true,
+        open_output_on_error = false,
+        close_quickfix_on_success = false,
+        output_max_lines = 2000,
+    },
     filter = {
         gitignored = true,
     },
@@ -89,6 +97,14 @@ M.defaults = {
         toggle_gitignore = "I",
         expand_all = "E",
         collapse_all = "W",
+        build = "B",
+        restore = "R",
+        clean = "C",
+        test = "T",
+        add = "A",
+        action_menu = "m",
+        task_output = "O",
+        cancel_task = "X",
     },
 }
 

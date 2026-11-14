@@ -53,6 +53,8 @@ function M.disable()
         M.toggle()
     end
     diagnostics.detach()
+    local runner = require("csharp-explorer.runner")
+    runner.shutdown()
     vim.api.nvim_exec_autocmds("User", { pattern = "CSharpExplorerDisable" })
     vim.notify("CSharp Explorer Disabled", vim.log.levels.INFO)
 end
@@ -252,6 +254,54 @@ function M.collapse_all()
     navigation.collapse_all(M)()
 end
 
+function M.build(opts)
+    return require("csharp-explorer.actions.build").build(M, opts)
+end
+
+function M.restore(opts)
+    return require("csharp-explorer.actions.build").restore(M, opts)
+end
+
+function M.clean(opts)
+    return require("csharp-explorer.actions.build").clean(M, opts)
+end
+
+function M.test(opts)
+    return require("csharp-explorer.actions.test").run_target(M, opts)
+end
+
+function M.test_nearest(opts)
+    return require("csharp-explorer.actions.test").run_nearest(M, opts)
+end
+
+function M.test_select(opts)
+    return require("csharp-explorer.actions.test").select_test(M, opts)
+end
+
+function M.add(opts)
+    return require("csharp-explorer.actions.templates").add(M, opts)
+end
+
+function M.add_item(opts)
+    return require("csharp-explorer.actions.templates").add_item(M, opts)
+end
+
+function M.add_project(opts)
+    return require("csharp-explorer.actions.templates").add_project(M, opts)
+end
+
+function M.action_menu()
+    return require("csharp-explorer.actions.templates").action_menu(M)
+end
+
+function M.task_output()
+    return require("csharp-explorer.runner").toggle_output()
+end
+
+function M.cancel_task()
+    return require("csharp-explorer.runner").cancel()
+end
+
 function M.setup(opts)
     config.setup(opts)
     M.config = config.current
@@ -291,6 +341,42 @@ function M.setup(opts)
         M.collapse_all,
         { desc = "Collapse All in C# Solution Explorer" }
     )
+    vim.api.nvim_create_user_command("CSharpExplorerBuild", function(cmd_opts)
+        M.build({ args = cmd_opts.args })
+    end, { desc = "Build target in C# Solution Explorer" })
+    vim.api.nvim_create_user_command("CSharpExplorerRestore", function(cmd_opts)
+        M.restore({ args = cmd_opts.args })
+    end, { desc = "Restore target in C# Solution Explorer" })
+    vim.api.nvim_create_user_command("CSharpExplorerClean", function(cmd_opts)
+        M.clean({ args = cmd_opts.args })
+    end, { desc = "Clean target in C# Solution Explorer" })
+    vim.api.nvim_create_user_command("CSharpExplorerTest", function(cmd_opts)
+        M.test({ args = cmd_opts.args })
+    end, { desc = "Run tests on target in C# Solution Explorer" })
+    vim.api.nvim_create_user_command("CSharpExplorerTestNearest", function(cmd_opts)
+        M.test_nearest({ args = cmd_opts.args })
+    end, { desc = "Run nearest test in C# Solution Explorer" })
+    vim.api.nvim_create_user_command("CSharpExplorerTestSelect", function(cmd_opts)
+        M.test_select({ args = cmd_opts.args })
+    end, { desc = "Select and run test in C# Solution Explorer" })
+    vim.api.nvim_create_user_command("CSharpExplorerAdd", function(cmd_opts)
+        M.add({ args = cmd_opts.args })
+    end, { desc = "Add item or project in C# Solution Explorer" })
+    vim.api.nvim_create_user_command("CSharpExplorerAddItem", function(cmd_opts)
+        M.add_item({ args = cmd_opts.args })
+    end, { desc = "Add C# item in C# Solution Explorer" })
+    vim.api.nvim_create_user_command("CSharpExplorerAddProject", function(cmd_opts)
+        M.add_project({ args = cmd_opts.args })
+    end, { desc = "Add .NET project in C# Solution Explorer" })
+    vim.api.nvim_create_user_command("CSharpExplorerActions", function()
+        M.action_menu()
+    end, { desc = "Action menu in C# Solution Explorer" })
+    vim.api.nvim_create_user_command("CSharpExplorerTaskOutput", function()
+        M.task_output()
+    end, { desc = "Toggle task output in C# Solution Explorer" })
+    vim.api.nvim_create_user_command("CSharpExplorerCancel", function()
+        M.cancel_task()
+    end, { desc = "Cancel running task in C# Solution Explorer" })
 
     if not M._events_bound then
         M._events_bound = true

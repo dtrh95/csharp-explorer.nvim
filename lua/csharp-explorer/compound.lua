@@ -287,7 +287,7 @@ local function select_items_loop(state, name, initial_items, on_save)
         local resolved = M.resolve_item_config(item, all_cfgs, solution_dir)
         if resolved then
             local key = resolved.project_path .. ":" .. resolved.profile_name
-            selected[key] = true
+            selected[key] = item.mode or "run"
             existing_meta[key] = {
                 delay_ms = item.delay_ms or 0,
                 hot_reload = item.hot_reload,
@@ -299,7 +299,13 @@ local function select_items_loop(state, name, initial_items, on_save)
         local items = {}
         for _, cfg in ipairs(all_cfgs) do
             local key = cfg.project_path .. ":" .. cfg.profile_name
-            local check = selected[key] and "[x] " or "[ ] "
+            local mode = selected[key]
+            local check = "[ ] "
+            if mode == "run" then
+                check = "[Run] "
+            elseif mode == "debug" then
+                check = "[Debug] "
+            end
             items[#items + 1] = check .. cfg.name
         end
         items[#items + 1] = "--- Actions ---"
@@ -323,6 +329,7 @@ local function select_items_loop(state, name, initial_items, on_save)
                             profile_name = cfg.profile_name,
                             delay_ms = prev and prev.delay_ms or 0,
                             hot_reload = prev and prev.hot_reload or nil,
+                            mode = selected[key] or "run",
                         }
                     end
                 end
@@ -338,7 +345,14 @@ local function select_items_loop(state, name, initial_items, on_save)
             local cfg = all_cfgs[idx]
             if cfg then
                 local key = cfg.project_path .. ":" .. cfg.profile_name
-                selected[key] = not selected[key]
+                local curr = selected[key]
+                if not curr then
+                    selected[key] = "run"
+                elseif curr == "run" then
+                    selected[key] = "debug"
+                else
+                    selected[key] = nil
+                end
             end
             prompt_menu()
         end)
@@ -350,9 +364,15 @@ end
 function M.manage_compounds(state)
     local compounds = M.get_compounds(state)
     local menu_items = {}
+    local actions_map = {}
 
     for _, c in ipairs(compounds) do
-        menu_items[#menu_items + 1] = "Run: " .. c.name .. " (" .. #c.items .. " projects)"
+        local run_label = "Run: " .. c.name .. " (" .. #c.items .. " projects)"
+        local debug_label = "Debug: " .. c.name .. " (" .. #c.items .. " projects)"
+        menu_items[#menu_items + 1] = run_label
+        menu_items[#menu_items + 1] = debug_label
+        actions_map[run_label] = { action = "run", compound = c }
+        actions_map[debug_label] = { action = "debug", compound = c }
     end
     menu_items[#menu_items + 1] = "[+] Create New Compound"
     if #compounds > 0 then
@@ -360,8 +380,28 @@ function M.manage_compounds(state)
         menu_items[#menu_items + 1] = "[-] Delete Compound"
     end
 
-    vim.ui.select(menu_items, { prompt = "Manage Compound Configurations:" }, function(choice, idx)
+    vim.ui.select(menu_items, { prompt = "Manage Compound Configurations:" }, function(choice, _idx)
         if not choice then
+            return
+        end
+
+        local mapped = actions_map[choice]
+        if mapped then
+            if mapped.action == "run" then
+                local ok, run_actions = pcall(require, "csharp-explorer.actions.run")
+                if ok and run_actions.run_compound then
+                    run_actions.run_compound(state, mapped.compound)
+                else
+                    vim.notify("Run actions not initialized yet.", vim.log.levels.INFO)
+                end
+            elseif mapped.action == "debug" then
+                local ok, debug_actions = pcall(require, "csharp-explorer.actions.debug")
+                if ok and debug_actions.debug_compound then
+                    debug_actions.debug_compound(state, mapped.compound)
+                else
+                    vim.notify("Debug actions not initialized yet.", vim.log.levels.INFO)
+                end
+            end
             return
         end
 
@@ -429,16 +469,6 @@ function M.manage_compounds(state)
                 vim.notify("Deleted compound: " .. sel_name, vim.log.levels.INFO)
             end)
             return
-        end
-
-        local comp = compounds[idx]
-        if comp then
-            local ok, run_actions = pcall(require, "csharp-explorer.actions.run")
-            if ok and run_actions.run_compound then
-                run_actions.run_compound(state, comp)
-            else
-                vim.notify("Run actions not initialized yet.", vim.log.levels.INFO)
-            end
         end
     end)
 end

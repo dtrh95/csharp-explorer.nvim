@@ -46,17 +46,15 @@ local function create_ring_buffer(max_size)
     end
 
     function buf:get_lines()
+        local out = {}
         if self._count < self._max then
-            local out = {}
             for i = 1, self._count do
                 out[#out + 1] = self._items[i]
             end
-            return out
-        end
-        local out = {}
-        for i = 0, self._max - 1 do
-            local idx = ((self._head - 1 + i) % self._max) + 1
-            out[#out + 1] = self._items[idx]
+        else
+            for i = 0, self._max - 1 do
+                out[#out + 1] = self._items[((self._head - 1 + i) % self._max) + 1]
+            end
         end
         return out
     end
@@ -69,7 +67,6 @@ local function create_ring_buffer(max_size)
         if delta >= self._count then
             return self:get_lines(), self._total_seq, true
         end
-
         local out = {}
         if self._count < self._max then
             for i = self._count - delta + 1, self._count do
@@ -77,8 +74,7 @@ local function create_ring_buffer(max_size)
             end
         else
             for k = 0, delta - 1 do
-                local idx = ((self._head - 1 + (self._max - delta) + k) % self._max) + 1
-                out[#out + 1] = self._items[idx]
+                out[#out + 1] = self._items[((self._head - 1 + (self._max - delta) + k) % self._max) + 1]
             end
         end
         return out, self._total_seq, false
@@ -130,41 +126,16 @@ local function sanitize_line(raw_line)
     if line:find("\r") then
         line = line:gsub("\r+$", "")
         local after_cr = line:match(".*\r([^\r]+)$")
-        if after_cr and after_cr ~= "" then
-            line = after_cr
-        else
-            line = line:gsub("\r", "")
-        end
+        line = (after_cr and after_cr ~= "") and after_cr or line:gsub("\r", "")
     end
     local clean = strip_ansi(line)
     if #clean > MAX_LINE_CHARS then
-        local max_cut = MAX_LINE_CHARS - 15
-        local cut = max_cut
-        local steps = 0
-        while cut > 0 and steps < 3 do
-            local b = string.byte(clean, cut)
-            if b and b >= 128 and b < 192 then
-                cut = cut - 1
-                steps = steps + 1
-            else
-                break
-            end
+        local cut = MAX_LINE_CHARS - 15
+        while cut > 0 and (string.byte(clean, cut) or 0) >= 128 and (string.byte(clean, cut) or 0) < 192 do
+            cut = cut - 1
         end
-        if cut > 0 then
-            local b = string.byte(clean, cut)
-            if b and b >= 192 then
-                local seq_len = 2
-                if b >= 240 then
-                    seq_len = 4
-                elseif b >= 224 then
-                    seq_len = 3
-                end
-                if cut + seq_len - 1 <= max_cut then
-                    cut = cut + seq_len - 1
-                else
-                    cut = cut - 1
-                end
-            end
+        if cut > 0 and (string.byte(clean, cut) or 0) >= 192 then
+            cut = cut - 1
         end
         clean = clean:sub(1, cut) .. "... [truncated]"
     end
@@ -192,11 +163,7 @@ local function process_stream_data(session, chunk, is_stderr)
         if rem:find("\r") then
             local stripped_rem = rem:gsub("\r+$", "")
             local collapsed = stripped_rem:match(".*\r([^\r]+)$")
-            if collapsed and collapsed ~= "" then
-                rem = collapsed
-            else
-                rem = stripped_rem:gsub("\r", "")
-            end
+            rem = (collapsed and collapsed ~= "") and collapsed or stripped_rem:gsub("\r", "")
         end
         if #rem > MAX_REMAINDER_BYTES then
             lines[#lines + 1] = rem
@@ -208,16 +175,8 @@ local function process_stream_data(session, chunk, is_stderr)
     local url_detected = false
     for _, raw_line in ipairs(lines) do
         local clean = sanitize_line(raw_line)
-        local urls = extract_urls(clean)
-        for _, u in ipairs(urls) do
-            local exists = false
-            for _, existing in ipairs(session.detected_urls) do
-                if existing == u then
-                    exists = true
-                    break
-                end
-            end
-            if not exists then
+        for _, u in ipairs(extract_urls(clean)) do
+            if not vim.tbl_contains(session.detected_urls, u) then
                 session.detected_urls[#session.detected_urls + 1] = u
                 url_detected = true
             end
@@ -260,13 +219,9 @@ end
 
 function M.remove_session(id)
     local session = M.sessions[id]
-    if not session then
+    if not session or session.status == "starting" or session.status == "running" or session.status == "stopping" then
         return false
     end
-    if session.status == "starting" or session.status == "running" or session.status == "stopping" then
-        return false
-    end
-
     M.sessions[id] = nil
     for i, sid in ipairs(M.session_order) do
         if sid == id then
@@ -355,14 +310,9 @@ local function finalize_session(session, status, exit_code, exit_signal)
     cleanup_build_result_file(session)
     flush_stream_remainders(session)
 
-    session.exit_code = exit_code
-    session.exit_signal = exit_signal
-    session.ended_at = os.time()
-    session.stage = "exited"
-    session.status = status
-    session.handle = nil
-    session.build_handle = nil
-    session.build_pid = nil
+    session.exit_code, session.exit_signal, session.ended_at = exit_code, exit_signal, os.time()
+    session.stage, session.status = "exited", status
+    session.handle, session.build_handle, session.build_pid = nil, nil, nil
 
     dispatch_event("exited", session)
 
@@ -410,17 +360,26 @@ local function spawn_runtime_process(session, cmd, env, cwd, is_direct_start)
         return session
     end
 
-    session.handle = handle
-    session.pid = handle.pid
-    session.status = "running"
-    session.stage = "running"
-
-    if is_direct_start then
-        dispatch_event("started", session)
-    else
-        dispatch_event("status_changed", session)
-    end
+    session.handle, session.pid, session.status, session.stage = handle, handle.pid, "running", "running"
+    dispatch_event(is_direct_start and "started" or "status_changed", session)
     return session
+end
+
+local function complete_job(item, ok, props, code, signal)
+    if not item or item.completed then
+        return
+    end
+    item.completed = true
+    if item.on_complete then
+        local cb = item.on_complete
+        if vim.in_fast_event() then
+            vim.schedule(function()
+                pcall(cb, ok, props, code, signal)
+            end)
+        else
+            pcall(cb, ok, props, code, signal)
+        end
+    end
 end
 
 local function pump_build_queue()
@@ -430,71 +389,68 @@ local function pump_build_queue()
 
     while #build_queue > 0 do
         local item = table.remove(build_queue, 1)
-        local session = item.session
-        if session and session.status == "starting" and not session.user_stopped and session.stage == "queued" then
+        if not item.cancelled and item.run_cfg then
             local result_file = vim.fn.tempname() .. ".json"
-            local ok_prep, bcmd, benv, bcwd = pcall(run_config.build_prepare_command, session.config, result_file)
+            local ok_prep, bcmd, benv, bcwd =
+                pcall(run_config.build_prepare_command, item.run_cfg, result_file, item.opts)
             if not ok_prep or not bcmd then
                 pcall(uv.fs_unlink, result_file)
-                session.ring_buffer:push("Failed to prepare build command: " .. tostring(bcmd))
-                finalize_session(session, "failed", -1, nil)
+                complete_job(item, false, nil, -1, nil)
                 vim.schedule(pump_build_queue)
                 return
             end
 
-            active_build = session
-            session.stage = "building"
-            session.build_result_file = result_file
-            dispatch_event("status_changed", session)
+            item.result_file = result_file
+            active_build = item
 
             local function on_b_stdout(err, data)
-                if not err and data and data ~= "" then
-                    process_stream_data(session, data, false)
+                if not err and data and data ~= "" and item.on_output then
+                    pcall(item.on_output, data, false)
                 end
             end
 
             local function on_b_stderr(err, data)
-                if not err and data and data ~= "" then
-                    process_stream_data(session, data, true)
+                if not err and data and data ~= "" and item.on_output then
+                    pcall(item.on_output, data, true)
                 end
             end
 
             local function on_build_exit(obj)
-                local bpid = session.build_pid
-                session.build_handle = nil
-                session.build_pid = nil
+                local cur = active_build
+                local bpid = cur and cur.build_pid
+                if cur then
+                    cur.build_handle = nil
+                    cur.build_pid = nil
+                end
+
+                local props = cur and cur.result_file and run_config.read_build_properties(cur.result_file) or nil
+                if cur and cur.result_file then
+                    pcall(uv.fs_unlink, cur.result_file)
+                    cur.result_file = nil
+                end
+
                 active_build = nil
-
-                local props = run_config.read_build_properties(result_file)
-                cleanup_build_result_file(session)
-
                 vim.schedule(pump_build_queue)
 
-                if session.user_stopped or session.status == "stopped" or session.stage == "exited" then
+                if not cur then
+                    return
+                end
+
+                if cur.cancelled then
                     if bpid and vim.fn.has("win32") == 0 then
                         pcall(uv.kill, -bpid, 9)
                         pcall(uv.kill, bpid, 9)
                     end
-                    if session.stage ~= "exited" then
-                        finalize_session(session, "stopped", obj.code, obj.signal)
-                    end
+                    complete_job(cur, false, nil, obj.code, obj.signal)
                     return
                 end
 
                 if obj.code ~= 0 then
-                    finalize_session(session, "failed", obj.code, obj.signal)
+                    complete_job(cur, false, props, obj.code, obj.signal)
                     return
                 end
 
-                local ok_cmd, rcmd, renv, rcwd = pcall(run_config.build_direct_command_and_env, session.config, props)
-                if not ok_cmd or not rcmd then
-                    session.ring_buffer:push("Failed to resolve direct command: " .. tostring(rcmd))
-                    finalize_session(session, "failed", -1, nil)
-                    return
-                end
-
-                flush_stream_remainders(session)
-                spawn_runtime_process(session, rcmd, renv, rcwd, false)
+                complete_job(cur, true, props, obj.code, obj.signal)
             end
 
             local ok_bspawn, bhandle = pcall(vim.system, bcmd, {
@@ -507,14 +463,18 @@ local function pump_build_queue()
 
             if not ok_bspawn or not bhandle then
                 active_build = nil
-                session.ring_buffer:push("Failed to start build process: " .. tostring(bhandle))
-                finalize_session(session, "failed", -1, nil)
+                pcall(uv.fs_unlink, result_file)
+                item.result_file = nil
+                complete_job(item, false, nil, -1, nil)
                 vim.schedule(pump_build_queue)
                 return
             end
 
-            session.build_handle = bhandle
-            session.build_pid = bhandle.pid
+            item.build_handle = bhandle
+            item.build_pid = bhandle.pid
+            if item.on_started then
+                pcall(item.on_started, bhandle.pid)
+            end
             return
         end
     end
@@ -567,14 +527,7 @@ function M.start(run_cfg, opts)
     }
 
     M.sessions[id] = session
-    local in_order = false
-    for _, sid in ipairs(M.session_order) do
-        if sid == id then
-            in_order = true
-            break
-        end
-    end
-    if not in_order then
+    if not vim.tbl_contains(M.session_order, id) then
         M.session_order[#M.session_order + 1] = id
     end
 
@@ -585,9 +538,40 @@ function M.start(run_cfg, opts)
 
     session.status = "starting"
     session.stage = "queued"
-    build_queue[#build_queue + 1] = { session = session, opts = opts }
     dispatch_event("started", session)
-    pump_build_queue()
+
+    session.build_ticket = M.enqueue_project_build(run_cfg, { hot_reload = opts.hot_reload }, {
+        on_started = function(bpid)
+            session.build_pid = bpid
+            session.stage = "building"
+            dispatch_event("status_changed", session)
+        end,
+        on_output = function(data, is_err)
+            process_stream_data(session, data, is_err)
+        end,
+        on_complete = function(ok, props, code, signal)
+            session.build_ticket = nil
+            session.build_pid = nil
+            if session.user_stopped or session.status == "stopped" or session.stage == "exited" then
+                if session.stage ~= "exited" then
+                    finalize_session(session, "stopped", code, signal)
+                end
+                return
+            end
+            if not ok or (code and code ~= 0) then
+                finalize_session(session, "failed", code or -1, signal)
+                return
+            end
+            local ok_cmd, rcmd, renv, rcwd = pcall(run_config.build_direct_command_and_env, session.config, props)
+            if not ok_cmd or not rcmd then
+                session.ring_buffer:push("Failed to resolve direct command: " .. tostring(rcmd))
+                finalize_session(session, "failed", -1, nil)
+                return
+            end
+            flush_stream_remainders(session)
+            spawn_runtime_process(session, rcmd, renv, rcwd, false)
+        end,
+    })
     return session
 end
 
@@ -647,23 +631,13 @@ function M.stop(id, opts)
         return false
     end
 
-    if session.stage == "queued" then
-        for i, item in ipairs(build_queue) do
-            if item.session == session then
-                table.remove(build_queue, i)
-                break
-            end
+    if session.stage == "queued" or session.stage == "building" then
+        session.user_stopped = true
+        if session.build_ticket then
+            session.build_ticket.cancel(true)
+            session.build_ticket = nil
         end
-        session.user_stopped = true
         finalize_session(session, "stopped", nil, nil)
-        return true
-    end
-
-    if session.stage == "building" then
-        session.user_stopped = true
-        session.status = "stopping"
-        dispatch_event("status_changed", session)
-        signal_process_tree(session.build_pid, false, session)
         return true
     end
 
@@ -704,7 +678,8 @@ function M.restart(id, opts)
     return true
 end
 
-function M.stop_compound(compound_id)
+function M.stop_compound(compound_id, opts)
+    opts = opts or {}
     if not compound_id then
         return false
     end
@@ -720,10 +695,19 @@ function M.stop_compound(compound_id)
             end
         end
     end
+    if not opts.from_peer and package.loaded["csharp-explorer.debug"] then
+        local ok, dbg = pcall(require, "csharp-explorer.debug")
+        if ok and dbg and dbg.stop_compound then
+            if dbg.stop_compound(compound_id, { from_peer = true }) then
+                stopped_any = true
+            end
+        end
+    end
     return stopped_any
 end
 
-function M.stop_all()
+function M.stop_all(opts)
+    opts = opts or {}
     cancel_deferred_timers(nil)
     for _, s in pairs(M.sessions) do
         s.pending_restart = nil
@@ -731,10 +715,81 @@ function M.stop_all()
             M.stop(s.id, { single = true })
         end
     end
+    if not opts.from_peer and package.loaded["csharp-explorer.debug"] then
+        local ok, dbg = pcall(require, "csharp-explorer.debug")
+        if ok and dbg and dbg.stop_all then
+            dbg.stop_all({ from_peer = true })
+        end
+    end
+end
+
+local next_ticket_id = 1
+function M.enqueue_project_build(run_cfg, opts, callbacks)
+    opts = opts or {}
+    callbacks = callbacks or {}
+    local ticket_id = "build_ticket:" .. tostring(next_ticket_id)
+    next_ticket_id = next_ticket_id + 1
+
+    local item = {
+        id = ticket_id,
+        run_cfg = run_cfg,
+        opts = opts,
+        on_started = callbacks.on_started,
+        on_output = callbacks.on_output,
+        on_complete = callbacks.on_complete,
+        cancelled = false,
+        completed = false,
+        result_file = nil,
+        build_handle = nil,
+        build_pid = nil,
+    }
+
+    local ticket = {
+        id = ticket_id,
+        cancel = function(immediate)
+            item.cancelled = true
+            for i, queued in ipairs(build_queue) do
+                if queued == item then
+                    table.remove(build_queue, i)
+                    complete_job(item, false, nil, -1, nil)
+                    return true
+                end
+            end
+            if active_build == item then
+                if item.build_pid then
+                    signal_process_tree(item.build_pid, immediate == true)
+                end
+                complete_job(item, false, nil, -1, nil)
+                return true
+            end
+            return false
+        end,
+    }
+
+    build_queue[#build_queue + 1] = item
+    pump_build_queue()
+    return ticket
 end
 
 function M.shutdown()
     cancel_deferred_timers(nil)
+    if active_build then
+        active_build.cancelled = true
+        if active_build.build_pid then
+            signal_process_tree(active_build.build_pid, true)
+            active_build.build_handle = nil
+            active_build.build_pid = nil
+        end
+        if active_build.result_file then
+            pcall(uv.fs_unlink, active_build.result_file)
+            active_build.result_file = nil
+        end
+        complete_job(active_build, false, nil, -1, nil)
+        active_build = nil
+    end
+    for _, item in ipairs(build_queue) do
+        complete_job(item, false, nil, -1, nil)
+    end
     build_queue = {}
     for _, s in pairs(M.sessions) do
         s.user_stopped = true
@@ -742,6 +797,10 @@ function M.shutdown()
         cancel_kill_timer(s)
         cleanup_build_result_file(s)
 
+        if s.build_ticket then
+            s.build_ticket.cancel(true)
+            s.build_ticket = nil
+        end
         if s.build_pid then
             signal_process_tree(s.build_pid, true, s)
             s.build_handle = nil
@@ -758,5 +817,10 @@ function M.shutdown()
     end
     active_build = nil
 end
+
+M.create_ring_buffer = create_ring_buffer
+M.sanitize_line = sanitize_line
+M.extract_urls = extract_urls
+M.signal_process_tree = signal_process_tree
 
 return M

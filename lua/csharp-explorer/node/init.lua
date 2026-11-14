@@ -101,14 +101,14 @@ local function get_gitignored_set(dir, files)
     return ignored
 end
 
-local function prune_empty_folders(node)
+local function prune_empty_folders(node, ignored)
     if not node._children then
         return
     end
     for key, child in pairs(node._children) do
         if child._type == "folder" then
-            prune_empty_folders(child)
-            if not next(child._children) then
+            prune_empty_folders(child, ignored)
+            if not next(child._children) and (not child._dir or (ignored and ignored[child._dir])) then
                 node._children[key] = nil
             end
         end
@@ -258,6 +258,7 @@ local IGNORED_SCAN_DIRS = {
 
 local function scan_project_files(root_dir)
     local files = {}
+    local dirs = {}
     local norm_root = metadata.normalize_path(root_dir)
     local stack = { norm_root }
     while #stack > 0 do
@@ -278,6 +279,7 @@ local function scan_project_files(root_dir)
                 if ftype == "directory" then
                     if not IGNORED_SCAN_DIRS[name] then
                         stack[#stack + 1] = full
+                        dirs[#dirs + 1] = full
                     end
                 elseif ftype == "file" and is_supported_project_file(name) then
                     files[#files + 1] = full
@@ -285,7 +287,7 @@ local function scan_project_files(root_dir)
             end
         end
     end
-    return files
+    return files, dirs
 end
 
 function M.populate_cs_files(node)
@@ -293,16 +295,31 @@ function M.populate_cs_files(node)
         return
     end
 
-    local files = scan_project_files(node._dir)
+    local files, dirs = scan_project_files(node._dir)
 
     local ignored = {}
     if config.current.filter.gitignored then
-        ignored = get_gitignored_set(node._dir, files)
+        local all_scan = {}
+        for _, f in ipairs(files) do
+            all_scan[#all_scan + 1] = f
+        end
+        for _, d in ipairs(dirs) do
+            all_scan[#all_scan + 1] = d
+        end
+        ignored = get_gitignored_set(node._dir, all_scan)
     end
 
     local by_dir = {}
     local dir_order = {}
     local norm_node_dir = metadata.normalize_path(node._dir)
+
+    for _, d in ipairs(dirs) do
+        local norm_d = metadata.normalize_path(d)
+        if not by_dir[norm_d] then
+            by_dir[norm_d] = {}
+            table.insert(dir_order, norm_d)
+        end
+    end
 
     for _, f in ipairs(files) do
         if not ignored[f] then
@@ -393,7 +410,7 @@ function M.populate_cs_files(node)
     end
 
     if config.current.filter.gitignored then
-        prune_empty_folders(node)
+        prune_empty_folders(node, ignored)
     end
 
     if node._saved_expanded then

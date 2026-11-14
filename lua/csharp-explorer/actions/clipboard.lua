@@ -1,3 +1,5 @@
+local metadata = require("csharp-explorer.metadata")
+local nesting = require("csharp-explorer.nesting")
 local uv = vim.uv or vim.loop
 
 local M = {}
@@ -106,8 +108,23 @@ local function resolve_dest_dir(dest_node)
     return vim.fn.fnamemodify(dest_path, ":h")
 end
 
-function M.paste(dest_node)
-    if dest_node._virtual then
+local function scan_directory_simple(dir)
+    local names = {}
+    local handle = uv.fs_scandir(dir)
+    if handle then
+        while true do
+            local name = uv.fs_scandir_next(handle)
+            if not name then
+                break
+            end
+            names[#names + 1] = name
+        end
+    end
+    return names
+end
+
+function M.paste(dest_node, state, opts)
+    if not dest_node or dest_node._virtual then
         vim.notify("Cannot paste into virtual metadata nodes", vim.log.levels.WARN)
         return
     end
@@ -117,6 +134,7 @@ function M.paste(dest_node)
         vim.notify("Cannot determine paste destination", vim.log.levels.WARN)
         return
     end
+    dest_dir = metadata.normalize_path(dest_dir)
 
     local action
     local items = {}
@@ -136,21 +154,42 @@ function M.paste(dest_node)
         return
     end
 
+    if action == "cut" then
+        clear_list(M.cut_list)
+        clear_list(M.copy_list)
+        local refactor = require("csharp-explorer.actions.refactor")
+        return refactor.move_entries(items, dest_dir, state, opts)
+    end
+
     local errors = {}
+    local copied_files = {}
+
     for _, entry in ipairs(items) do
-        local target = dest_dir .. "/" .. entry.name
+        local target = metadata.normalize_path(dest_dir .. "/" .. entry.name)
         if uv.fs_stat(target) then
             vim.notify("Already exists, skipping: " .. entry.name, vim.log.levels.WARN)
         else
-            if action == "cut" then
-                local ok, err = uv.fs_rename(entry.path, target)
-                if not ok then
-                    table.insert(errors, entry.name .. ": " .. (err or "unknown error"))
-                end
+            local ok, err = do_copy(entry.path, target)
+            if not ok then
+                table.insert(errors, entry.name .. ": " .. (err or "unknown error"))
             else
-                local ok, err = do_copy(entry.path, target)
-                if not ok then
-                    table.insert(errors, entry.name .. ": " .. (err or "unknown error"))
+                copied_files[#copied_files + 1] = { path = target, is_dir = entry.is_dir }
+                if not entry.is_dir then
+                    local pdir = vim.fn.fnamemodify(entry.path, ":h")
+                    local siblings = scan_directory_simple(pdir)
+                    local comps = nesting.resolve_companions(entry.name, siblings)
+                    for _, c in ipairs(comps) do
+                        local comp_src = metadata.normalize_path(pdir .. "/" .. c)
+                        local comp_dst = metadata.normalize_path(dest_dir .. "/" .. c)
+                        if not uv.fs_stat(comp_dst) then
+                            local c_ok, c_err = do_copy(comp_src, comp_dst)
+                            if c_ok then
+                                copied_files[#copied_files + 1] = { path = comp_dst, is_dir = false }
+                            else
+                                table.insert(errors, c .. ": " .. (c_err or "unknown error"))
+                            end
+                        end
+                    end
                 end
             end
         end
@@ -159,17 +198,39 @@ function M.paste(dest_node)
     clear_list(M.cut_list)
     clear_list(M.copy_list)
 
+    local namespace_actions = require("csharp-explorer.actions.namespace")
+    local refactor = require("csharp-explorer.actions.refactor")
+    local watched = {}
+    for _, cp in ipairs(copied_files) do
+        if cp.is_dir then
+            namespace_actions.sync_directory(cp.path, state and state.tree, { force = true })
+            local dir_cs = namespace_actions.collect_cs_files_in_dir(cp.path)
+            for _, dfp in ipairs(dir_cs) do
+                watched[#watched + 1] = { path = dfp, type = 1 }
+            end
+        elseif vim.endswith(cp.path, ".cs") then
+            namespace_actions.sync_file(cp.path, state and state.tree, { force = true })
+            watched[#watched + 1] = { path = cp.path, type = 1 }
+        else
+            watched[#watched + 1] = { path = cp.path, type = 1 }
+        end
+    end
+    refactor.notify_watched_files(watched)
+
+    if state and state.tree then
+        local node_utils = require("csharp-explorer.node")
+        local renderer = require("csharp-explorer.renderer")
+        node_utils.reset_projects(state.tree)
+        if state.is_active and state.win and vim.api.nvim_win_is_valid(state.win) then
+            renderer.render(state)
+        end
+    end
+
     if #errors > 0 then
         vim.notify("Paste errors:\n" .. table.concat(errors, "\n"), vim.log.levels.ERROR)
     else
-        local verb = action == "cut" and "Moved" or "Copied"
-        vim.notify(verb .. " " .. #items .. " item(s)", vim.log.levels.INFO)
+        vim.notify("Copied " .. #items .. " item(s)", vim.log.levels.INFO)
     end
-
-    pcall(function()
-        local events = require("nvim-tree.events")
-        events._dispatch_folder_created(dest_dir)
-    end)
 end
 
 function M.is_cut(path)

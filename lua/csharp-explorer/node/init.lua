@@ -15,6 +15,7 @@ M.FILE_NODE_TYPES = {
     css_file = true,
     xaml_file = true,
     resx_file = true,
+    launch_settings = true,
 }
 
 M.NODE_PRIORITIES = {
@@ -33,6 +34,7 @@ M.NODE_PRIORITIES = {
     css_file = 40,
     xaml_file = 40,
     resx_file = 40,
+    launch_settings = 40,
     package = 40,
     project_reference = 40,
 }
@@ -64,7 +66,9 @@ end
 
 function M.classify_file_type(f_name)
     local lower = f_name:lower()
-    if lower:match("^appsettings.*%.json$") then
+    if lower == "launchsettings.json" then
+        return "launch_settings"
+    elseif lower:match("^appsettings.*%.json$") then
         return "appsettings"
     elseif lower == "dockerfile" or lower:match("^dockerfile%..+$") or lower == ".dockerignore" then
         return "dockerfile"
@@ -236,6 +240,9 @@ local function is_supported_project_file(name)
         or lower:sub(-5) == ".resx"
         or lower:sub(-5) == ".http"
     then
+        return true
+    end
+    if lower == "launchsettings.json" then
         return true
     end
     if lower:match("^appsettings.*%.json$") then

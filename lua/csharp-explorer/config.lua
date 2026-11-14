@@ -22,6 +22,7 @@ M.defaults = {
         css_file = " ",
         xaml_file = "󰙳 ",
         resx_file = "󰗀 ",
+        launch_settings = " ",
         dependencies = "󰆧 ",
         package_group = "󰏗 ",
         package = "󰏗 ",
@@ -73,6 +74,15 @@ M.defaults = {
         close_quickfix_on_success = false,
         output_max_lines = 2000,
     },
+    run = {
+        default_profile = nil,
+        focus_on_run = false,
+        window_height = 12,
+        max_log_lines = 5000,
+        auto_scroll = true,
+        terminate_timeout_ms = 1500,
+        compounds = {},
+    },
     filter = {
         gitignored = true,
     },
@@ -120,6 +130,11 @@ M.defaults = {
         search_text = "s",
         search_symbols = "S",
         find_files = "f",
+        run = "u",
+        run_select = "U",
+        run_window = "L",
+        manage_compounds = "gc",
+        reload_all = "gR",
     },
 }
 

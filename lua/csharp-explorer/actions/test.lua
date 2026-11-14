@@ -2,6 +2,7 @@ local runner = require("csharp-explorer.runner")
 local config = require("csharp-explorer.config")
 local metadata = require("csharp-explorer.metadata")
 local navigation = require("csharp-explorer.actions.navigation")
+local csharp_source = require("csharp-explorer.csharp_source")
 
 local M = {}
 
@@ -48,129 +49,7 @@ local CS_KEYWORDS = {
     namespace = true,
 }
 
-function M.strip_csharp_lexical_noise(src)
-    local out = {}
-    local i = 1
-    local len = #src
-    while i <= len do
-        local hit = src:find("[/\\\"'@$]", i)
-        if not hit then
-            table.insert(out, src:sub(i))
-            break
-        end
-        if hit > i then
-            table.insert(out, src:sub(i, hit - 1))
-            i = hit
-        end
-
-        local c = src:sub(i, i)
-        local c2 = src:sub(i, i + 1)
-
-        if c2 == "//" then
-            local nl = src:find("\n", i + 2, true)
-            if nl then
-                table.insert(out, string.rep(" ", nl - i))
-                i = nl
-            else
-                table.insert(out, string.rep(" ", len - i + 1))
-                break
-            end
-        elseif c2 == "/*" then
-            local end_c = src:find("*/", i + 2, true)
-            if end_c then
-                local seg = src:sub(i, end_c + 1)
-                table.insert(out, (seg:gsub("[^\n]", " ")))
-                i = end_c + 2
-            else
-                local seg = src:sub(i)
-                table.insert(out, (seg:gsub("[^\n]", " ")))
-                break
-            end
-        elseif src:sub(i, i + 2) == '"""' then
-            local qcount = 3
-            while src:sub(i + qcount, i + qcount) == '"' do
-                qcount = qcount + 1
-            end
-            local closing = string.rep('"', qcount)
-            local end_r = src:find(closing, i + qcount, true)
-            if end_r then
-                local last_q = end_r + qcount - 1
-                while src:sub(last_q + 1, last_q + 1) == '"' do
-                    last_q = last_q + 1
-                end
-                local seg = src:sub(i, last_q)
-                table.insert(out, (seg:gsub("[^\n]", " ")))
-                i = last_q + 1
-            else
-                local seg = src:sub(i)
-                table.insert(out, (seg:gsub("[^\n]", " ")))
-                break
-            end
-        elseif
-            (c == "@" and src:sub(i + 1, i + 1) == '"')
-            or (c == "$" and src:sub(i + 1, i + 2) == '@"')
-            or (c == "@" and src:sub(i + 1, i + 2) == '$"')
-        then
-            local q_start = (c == "@" and src:sub(i + 1, i + 1) == '"') and (i + 2) or (i + 3)
-            local j = q_start
-            while j <= len do
-                if src:sub(j, j) == '"' then
-                    if src:sub(j + 1, j + 1) == '"' then
-                        j = j + 2
-                    else
-                        j = j + 1
-                        break
-                    end
-                else
-                    j = j + 1
-                end
-            end
-            local seg = src:sub(i, j - 1)
-            table.insert(out, (seg:gsub("[^\n]", " ")))
-            i = j
-        elseif c == '"' then
-            local j = i + 1
-            while j <= len do
-                local sc = src:sub(j, j)
-                if sc == "\\" then
-                    j = j + 2
-                elseif sc == '"' then
-                    j = j + 1
-                    break
-                elseif sc == "\n" then
-                    break
-                else
-                    j = j + 1
-                end
-            end
-            local seg = src:sub(i, j - 1)
-            table.insert(out, (seg:gsub("[^\n]", " ")))
-            i = j
-        elseif c == "'" then
-            local j = i + 1
-            while j <= len do
-                local sc = src:sub(j, j)
-                if sc == "\\" then
-                    j = j + 2
-                elseif sc == "'" then
-                    j = j + 1
-                    break
-                elseif sc == "\n" then
-                    break
-                else
-                    j = j + 1
-                end
-            end
-            local seg = src:sub(i, j - 1)
-            table.insert(out, (seg:gsub("[^\n]", " ")))
-            i = j
-        else
-            table.insert(out, c)
-            i = i + 1
-        end
-    end
-    return table.concat(out)
-end
+M.strip_csharp_lexical_noise = csharp_source.strip_csharp_lexical_noise
 
 function M.discover_csharp_tests(src)
     local cleaned = M.strip_csharp_lexical_noise(src)

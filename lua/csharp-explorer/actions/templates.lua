@@ -256,7 +256,16 @@ local function write_item_file(state, target, tpl, raw_name, opts)
 
     metadata.clear_cache()
     if target.project_node then
+        local dep_node = target.project_node._children and target.project_node._children["Dependencies"]
+        local had_meta = target.project_node._meta_loaded
+        node_utils.reset_projects(target.project_node)
         node_utils.populate_cs_files(target.project_node)
+        if dep_node then
+            target.project_node._children["Dependencies"] = dep_node
+            target.project_node._meta_loaded = had_meta
+        elseif state and state.tree then
+            node_utils.populate_dependencies(target.project_node, state.tree)
+        end
     end
     if state and state.tree and state.is_active and state.win and vim.api.nvim_win_is_valid(state.win) then
         renderer.render(state)

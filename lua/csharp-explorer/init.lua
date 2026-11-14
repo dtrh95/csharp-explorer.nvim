@@ -17,6 +17,13 @@ M.tree = nil
 M.is_active = false
 M.config = config.current
 
+M.run = require("csharp-explorer.actions.run")
+M.process = require("csharp-explorer.process")
+M.run_config = require("csharp-explorer.run_config")
+M.compound = require("csharp-explorer.compound")
+M.reload = require("csharp-explorer.reload")
+M.run_window = require("csharp-explorer.ui.run_window")
+
 local function parse_workspace_solution(root_dir)
     local slnx_files = vim.fn.glob(root_dir .. "/*.slnx", false, true)
     local sln_files = vim.fn.glob(root_dir .. "/*.sln", false, true)
@@ -55,6 +62,7 @@ function M.disable()
     diagnostics.detach()
     local runner = require("csharp-explorer.runner")
     runner.shutdown()
+    require("csharp-explorer.process").shutdown()
     vim.api.nvim_exec_autocmds("User", { pattern = "CSharpExplorerDisable" })
     vim.notify("CSharp Explorer Disabled", vim.log.levels.INFO)
 end
@@ -330,6 +338,48 @@ function M.find_files(opts)
     return require("csharp-explorer.actions.search").files(M, opts)
 end
 
+function M.reparse_solution()
+    local root_dir = M._root_dir or vim.fn.getcwd()
+    M.tree = parse_workspace_solution(root_dir)
+    return M.tree
+end
+
+function M.run_target(opts)
+    return require("csharp-explorer.actions.run").run_target(M, opts)
+end
+
+function M.run_select(opts)
+    return require("csharp-explorer.actions.run").select_run_profile(M, opts)
+end
+
+function M.run_stop(opts)
+    return require("csharp-explorer.actions.run").stop_target(M, opts)
+end
+
+function M.run_stop_all(opts)
+    return require("csharp-explorer.actions.run").stop_all(M, opts)
+end
+
+function M.run_restart(opts)
+    return require("csharp-explorer.actions.run").restart_target(M, opts)
+end
+
+function M.run_window_toggle(opts)
+    return require("csharp-explorer.actions.run").toggle_run_window(M, opts)
+end
+
+function M.run_compound(opts)
+    return require("csharp-explorer.actions.run").run_compound(M, opts and opts.name, opts)
+end
+
+function M.compound_manage(opts)
+    return require("csharp-explorer.compound").manage_compounds(M, opts)
+end
+
+function M.reload_projects(opts)
+    return require("csharp-explorer.reload").reload_all(M, opts)
+end
+
 function M.setup(opts)
     config.setup(opts)
     M.config = config.current
@@ -426,11 +476,51 @@ function M.setup(opts)
     vim.api.nvim_create_user_command("CSharpExplorerFindFiles", function()
         M.find_files()
     end, { desc = "Find files in C# solution" })
+    vim.api.nvim_create_user_command("CSharpExplorerRun", function(cmd_opts)
+        M.run_target({ profile = cmd_opts.args ~= "" and cmd_opts.args or nil })
+    end, { nargs = "?", desc = "Run target project or profile" })
+    vim.api.nvim_create_user_command("CSharpExplorerRunSelect", function()
+        M.run_select()
+    end, { desc = "Select and run project profile or compound" })
+    vim.api.nvim_create_user_command("CSharpExplorerRunStop", function()
+        M.run_stop()
+    end, { desc = "Stop active project or run window process" })
+    vim.api.nvim_create_user_command("CSharpExplorerRunStopAll", function()
+        M.run_stop_all()
+    end, { desc = "Stop all active processes" })
+    vim.api.nvim_create_user_command("CSharpExplorerRunRestart", function()
+        M.run_restart()
+    end, { desc = "Restart active project or run window process" })
+    vim.api.nvim_create_user_command("CSharpExplorerRunWindow", function()
+        M.run_window_toggle()
+    end, { desc = "Toggle Rider-style Run tool window" })
+    vim.api.nvim_create_user_command("CSharpExplorerCompound", function(cmd_opts)
+        M.run_compound({ name = cmd_opts.args ~= "" and cmd_opts.args or nil })
+    end, { nargs = "?", desc = "Run compound launch configuration" })
+    vim.api.nvim_create_user_command("CSharpExplorerCompoundManage", function()
+        M.compound_manage()
+    end, { desc = "Manage compound launch configurations" })
+    vim.api.nvim_create_user_command("CSharpExplorerReloadProjects", function()
+        M.reload_projects()
+    end, { desc = "Reload all projects and recover crashed C# LSPs" })
 
     if not M._events_bound then
         M._events_bound = true
 
         local augroup = vim.api.nvim_create_augroup("CSharpExplorerLiveSync", { clear = true })
+        vim.api.nvim_create_autocmd("VimLeavePre", {
+            group = augroup,
+            callback = function()
+                require("csharp-explorer.process").shutdown()
+            end,
+        })
+
+        require("csharp-explorer.process").subscribe(function()
+            if M.is_active and M.buf and vim.api.nvim_buf_is_valid(M.buf) then
+                renderer.render_process_badges(M)
+            end
+        end)
+
         vim.api.nvim_create_autocmd("BufWritePost", {
             group = augroup,
             pattern = { "*.csproj", "*.props", "*.targets", "project.assets.json" },

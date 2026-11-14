@@ -150,6 +150,31 @@ function M.apply(state)
             require("csharp-explorer.actions.search").files(state)
         end, opts)
     end
+    if km.run then
+        bind_keys(km.run, function()
+            require("csharp-explorer.actions.run").run_target(state)
+        end, opts)
+    end
+    if km.run_select then
+        bind_keys(km.run_select, function()
+            require("csharp-explorer.actions.run").select_run_profile(state)
+        end, opts)
+    end
+    if km.run_window then
+        bind_keys(km.run_window, function()
+            require("csharp-explorer.actions.run").toggle_run_window(state)
+        end, opts)
+    end
+    if km.manage_compounds then
+        bind_keys(km.manage_compounds, function()
+            require("csharp-explorer.compound").manage_compounds(state)
+        end, opts)
+    end
+    if km.reload_all then
+        bind_keys(km.reload_all, function()
+            require("csharp-explorer.reload").reload_all(state)
+        end, opts)
+    end
 end
 
 return M

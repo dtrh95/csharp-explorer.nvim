@@ -32,11 +32,11 @@ _Focus: Bringing the richness of IDE trees to the Neovim buffer._
 
 _Focus: Taking action on the solution directly from the explorer._
 
-- [ ] **Integrated Build Control**:
+- [x] **Integrated Build Control**:
   - Bindings for `dotnet build`, `dotnet restore`, and `dotnet clean` on specific projects or the whole solution.
-- [ ] **Test Integration**:
+- [x] **Test Integration**:
   - Discover and run tests directly from a project/file node.
-- [ ] **Solution/Project Templates**:
+- [x] **Solution/Project Templates**:
   - Interface for `dotnet new` to add projects or classes via UI prompts.
 
 ## Phase 4: Intelligence & Refactoring 🧠
@@ -54,4 +54,4 @@ _Focus: Deep integration with LSP and build tools._
 
 ## Progress Tracking
 
-Completed **Phase 0 (Foundation)**, **Phase 1 (Project Metadata & Dependencies)**, and **Phase 2 (Enhanced UI & Visual Feedback)**. Next up is **Phase 3 (Project Orchestration)**.
+Completed **Phase 0 (Foundation)**, **Phase 1 (Project Metadata & Dependencies)**, **Phase 2 (Enhanced UI & Visual Feedback)**, and **Phase 3 (Project Orchestration)**. Next up is **Phase 4 (Intelligence & Refactoring)**.

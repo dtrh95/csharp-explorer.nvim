@@ -489,6 +489,37 @@ function M.action_menu(state)
     end
 
     table.insert(items, {
+        label = "Run Project (u)",
+        action = function()
+            require("csharp-explorer.actions.run").run_target(state)
+        end,
+    })
+    table.insert(items, {
+        label = "Select Run Profile / Compound (U)",
+        action = function()
+            require("csharp-explorer.actions.run").select_run_profile(state)
+        end,
+    })
+    table.insert(items, {
+        label = "Toggle Run Tool Window (L)",
+        action = function()
+            require("csharp-explorer.actions.run").toggle_run_window(state)
+        end,
+    })
+    table.insert(items, {
+        label = "Manage Compounds (gc)",
+        action = function()
+            require("csharp-explorer.compound").manage_compounds(state)
+        end,
+    })
+    table.insert(items, {
+        label = "Reload All Projects & LSPs (gR)",
+        action = function()
+            require("csharp-explorer.reload").reload_all(state)
+        end,
+    })
+
+    table.insert(items, {
         label = "Add C# Item...",
         action = function()
             M.add_item(state)

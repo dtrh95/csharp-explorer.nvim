@@ -22,6 +22,7 @@ local FILE_TYPE_NAMES = {
     css_file = "Stylesheet",
     xaml_file = "XAML Page",
     resx_file = "Resource File",
+    launch_settings = "Launch Settings",
 }
 
 local function format_bytes(bytes)
@@ -107,6 +108,22 @@ function M.inspect_node(node, state)
             table.insert(rows, { label = "Namespace", value = ns_val })
         end
 
+        if node._type == "launch_settings" and node._path then
+            local run_config = require("csharp-explorer.run_config")
+            local ok, cfgs =
+                pcall(run_config.parse_launch_settings, node._path, owning_proj and owning_proj._path or "")
+            if ok and cfgs and #cfgs > 0 then
+                local names = {}
+                for _, c in ipairs(cfgs) do
+                    table.insert(names, c.profile_name)
+                end
+                table.insert(
+                    rows,
+                    { label = "Profiles", value = string.format("%d (%s)", #cfgs, table.concat(names, ", ")) }
+                )
+            end
+        end
+
         if node_utils.is_nested_parent(node) then
             local count = 0
             for _ in pairs(node._children) do
@@ -171,6 +188,28 @@ function M.inspect_node(node, state)
             { label = "Direct Packages", value = tostring(pkg_count) },
             { label = "Project References", value = tostring(ref_count) },
         }
+
+        local ok_proc, process = pcall(require, "csharp-explorer.process")
+        if ok_proc and node._path then
+            local sessions = process.get_project_sessions(node._path)
+            if #sessions > 0 then
+                local best = sessions[1]
+                for _, s in ipairs(sessions) do
+                    if s.status == "running" then
+                        best = s
+                        break
+                    end
+                end
+                local val = best.status
+                if best.pid then
+                    val = val .. string.format(" (PID %d)", best.pid)
+                end
+                if best.detected_urls and #best.detected_urls > 0 then
+                    val = val .. " [" .. best.detected_urls[1] .. "]"
+                end
+                table.insert(rows, { label = "Process", value = val })
+            end
+        end
 
         local diag_sum = diagnostics.get_dir_summary(node._dir)
         if diag_sum and (diag_sum.error + diag_sum.warn + diag_sum.info + diag_sum.hint > 0) then

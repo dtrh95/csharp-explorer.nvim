@@ -43,15 +43,15 @@ _Focus: Taking action on the solution directly from the explorer._
 
 _Focus: Deep integration with LSP and build tools._
 
-- [ ] **Safe Refactoring**:
-  - Rename/Delete operations that update File & Symbol references across the whole solution via LSP.
-- [ ] **Namespace Syncing**:
-  - Automatically update `namespace` declarations when a file is moved between folders.
-- [ ] **Search Within Solution**:
+- [x] **Safe Refactoring**:
+  - Rename and delete operations that update file and symbol references across the solution through LSP.
+- [x] **Namespace Syncing**:
+  - Automatically update namespace declarations when moving files between folders.
+- [x] **Search Within Solution**:
   - Global symbol search scoped to the explorer tree.
 
 ---
 
 ## Progress Tracking
 
-Completed **Phase 0 (Foundation)**, **Phase 1 (Project Metadata & Dependencies)**, **Phase 2 (Enhanced UI & Visual Feedback)**, and **Phase 3 (Project Orchestration)**. Next up is **Phase 4 (Intelligence & Refactoring)**.
+Completed **Phase 0 (Foundation)**, **Phase 1 (Project Metadata & Dependencies)**, **Phase 2 (Enhanced UI & Visual Feedback)**, **Phase 3 (Project Orchestration)**, and **Phase 4 (Intelligence & Refactoring)**.

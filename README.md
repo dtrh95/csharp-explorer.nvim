@@ -7,6 +7,9 @@ A lightweight C# Solution Explorer for Neovim that renders `.sln` and `.slnx` hi
 ## Features
 
 - **Solution and Project Parsing**: Parses classic `.sln` and XML `.slnx` solutions directly without waiting for an LSP server.
+- **Integrated Build Control**: Run `dotnet build` with `B`, `dotnet restore` with `R`, and `dotnet clean` with `C` on any solution, solution folder, project, directory, or source file. Tasks stream output to an asynchronous ring buffer and floating log window toggled by `O` or stopped with `X`. Build errors populate the quickfix list and sync to `vim.diagnostic` namespace `CSharpExplorerBuild`.
+- **Test Discovery and Execution**: Discovers xUnit, NUnit, and MSTest tests from C# source code with a lexical scanner. Press `T` in the tree to run tests across a solution, solution folder, project, or directory. On a test file, press `T` to select an individual test or run the whole file. From editor buffers, `:CSharpExplorerTestNearest` runs the enclosing test method or class. Test failures populate the quickfix list with exact source line numbers.
+- **Solution and Item Templates**: Press `A` to add projects or C# item files for the focused target. When focused on a solution or solution folder, `A` creates a new `.NET` project and adds it to the solution file with `dotnet sln add`. On a project, directory, or file, `A` generates classes, interfaces, records, enums, structs, controllers, or test classes with namespace inference, file-scoped declarations, and UTF-8 LF output without a byte-order mark. Press `m` to open the contextual actions menu.
 - **Dependencies Tree**: Pins a virtual `Dependencies` node at the top of each expanded project with `Packages` (direct NuGet packages and resolved versions) and `Projects` (project-to-project references), backed by `obj/project.assets.json` and an MSBuild XML fallback.
 - **Project Reference Navigation**: Press `<CR>` on an in-solution project reference to reveal and jump to that project in the explorer, or press `<C-v>` to open the target `.csproj` in the editor.
 - **Project Properties Shortcut**: Press `P` in the explorer or run `:CSharpExplorerOpenProperties` from any C# buffer to edit the owning `.csproj` file.
@@ -23,6 +26,7 @@ A lightweight C# Solution Explorer for Neovim that renders `.sln` and `.slnx` hi
 ## Prerequisites
 
 - Neovim 0.9.0+
+- [.NET SDK](https://dotnet.microsoft.com/) 6.0+ (`dotnet` binary in `PATH` or configured via `orchestration.dotnet_cmd`)
 - [nvim-tree/nvim-tree.lua](https://github.com/nvim-tree/nvim-tree.lua)
 - [nvim-tree/nvim-web-devicons](https://github.com/nvim-tree/nvim-web-devicons) (optional, for icons)
 
@@ -113,6 +117,14 @@ require("csharp-explorer").setup({
         max_width = 76,
         max_scan_lines = 120,
     },
+    orchestration = {
+        dotnet_cmd = nil,
+        file_scoped_namespaces = true,
+        open_quickfix_on_error = true,
+        open_output_on_error = false,
+        close_quickfix_on_success = false,
+        output_max_lines = 2000,
+    },
     filter = {
         gitignored = true,
     },
@@ -137,6 +149,14 @@ require("csharp-explorer").setup({
         toggle_gitignore = "I",
         expand_all = "E",
         collapse_all = "W",
+        build = "B",
+        restore = "R",
+        clean = "C",
+        test = "T",
+        add = "A",
+        action_menu = "m",
+        task_output = "O",
+        cancel_task = "X",
     },
 })
 ```
@@ -147,6 +167,18 @@ require("csharp-explorer").setup({
 - `:CSharpExplorerFindFile`: Reveal the active source file or `.csproj` in the explorer.
 - `:CSharpExplorerOpenProperties`: Open the owning `.csproj` for the focused explorer node or active buffer.
 - `:CSharpExplorerItemProperties`: Open the floating item properties inspector for the focused explorer node or active buffer.
+- `:CSharpExplorerBuild`: Build the focused target or owning project.
+- `:CSharpExplorerRestore`: Restore dependencies for the focused target or owning project.
+- `:CSharpExplorerClean`: Clean build outputs for the focused target or owning project.
+- `:CSharpExplorerTest`: Run unit tests for the focused target or active file.
+- `:CSharpExplorerTestNearest`: Run the nearest test method or test class enclosing the editor cursor.
+- `:CSharpExplorerTestSelect`: Open an interactive selector to run specific tests in the current file.
+- `:CSharpExplorerAdd`: Create a project or a C# item file for the focused target.
+- `:CSharpExplorerAddItem`: Open the C# item template picker.
+- `:CSharpExplorerAddProject`: Open the .NET project template wizard.
+- `:CSharpExplorerActions`: Open the contextual actions menu.
+- `:CSharpExplorerTaskOutput`: Toggle the floating task output log.
+- `:CSharpExplorerCancel`: Cancel the running dotnet task.
 - `:CSharpExplorerEnable` / `:CSharpExplorerDisable` / `:CSharpExplorerTogglePlugin`: Enable, disable, or toggle plugin state.
 - `:CSharpExplorerRefresh`: Re-parse the solution and refresh expanded nodes.
 - `:CSharpExplorerExpandAll`: Expand all solution and project folders.

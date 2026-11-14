@@ -25,6 +25,8 @@ local function focus_editor_window(state)
     vim.cmd("rightbelow vsplit")
 end
 
+M.focus_editor_window = focus_editor_window
+
 function M.get_node(state)
     local cursor = vim.api.nvim_win_get_cursor(state.win)
     return renderer.line_to_node[cursor[1]]
@@ -59,9 +61,11 @@ function M.reveal_project_in_tree(state, abs_path)
 
     matched_node._expanded = true
     renderer.render(state)
-    if matched_node._line_num then
+    if matched_node._line_num and state.win and vim.api.nvim_win_is_valid(state.win) then
         vim.api.nvim_win_set_cursor(state.win, { matched_node._line_num, 0 })
-        vim.cmd("normal! zz")
+        vim.api.nvim_win_call(state.win, function()
+            vim.cmd("normal! zz")
+        end)
     end
     return true
 end

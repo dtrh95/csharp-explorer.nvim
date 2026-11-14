@@ -353,7 +353,14 @@ local function build_header_lines(sessions, active, win_width)
     end
 
     local status_txt = active.status
-    if (active.status == "running" or active.status == "stopping") and active.pid then
+    if active.status == "starting" and active.stage == "queued" then
+        status_txt = "starting (queued)"
+    elseif active.status == "starting" and active.stage == "building" then
+        status_txt = "building"
+        if active.build_pid then
+            status_txt = status_txt .. " (PID " .. active.build_pid .. ")"
+        end
+    elseif (active.status == "running" or active.status == "stopping") and active.pid then
         status_txt = status_txt .. " (PID " .. active.pid .. ")"
     end
 

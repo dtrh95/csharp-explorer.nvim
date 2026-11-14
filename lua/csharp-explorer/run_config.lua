@@ -464,4 +464,144 @@ function M.build_command_and_env(run_cfg, opts)
     return cmd, apply_launch_profile_env(run_cfg), run_cfg.cwd
 end
 
+local function select_build_tfm(prof)
+    if not (prof and prof.target_frameworks and #prof.target_frameworks > 1) then
+        return nil
+    end
+    if vim.fn.has("win32") == 1 then
+        return prof.target_frameworks[1]
+    end
+    for _, tfm in ipairs(prof.target_frameworks) do
+        local lower = tfm:lower()
+        if not lower:find("-windows") and not lower:match("^net[1-4]%d") then
+            return tfm
+        end
+    end
+    for _, tfm in ipairs(prof.target_frameworks) do
+        if not tfm:lower():find("-windows") then
+            return tfm
+        end
+    end
+    return prof.target_frameworks[1]
+end
+
+function M.build_prepare_command(run_cfg, result_file)
+    local dotnet_bin = (config.current.orchestration and config.current.orchestration.dotnet_cmd)
+        or require("csharp-explorer.runner").resolve_dotnet()
+    local prof = metadata.get_project_profile(run_cfg.project_path)
+    local cmd = { dotnet_bin, "build", run_cfg.project_path }
+    local selected_tfm = select_build_tfm(prof)
+    if selected_tfm then
+        cmd[#cmd + 1] = "-f"
+        cmd[#cmd + 1] = selected_tfm
+    end
+    cmd[#cmd + 1] = "-nologo"
+    cmd[#cmd + 1] = "-nr:false"
+    cmd[#cmd + 1] = "-t:Build"
+    cmd[#cmd + 1] = "-getProperty:RunCommand,RunArguments,TargetPath,StartArguments"
+    if result_file and result_file ~= "" then
+        cmd[#cmd + 1] = "-getResultOutputFile:" .. result_file
+    end
+
+    local env = {}
+    for k, v in pairs(vim.fn.environ()) do
+        if type(k) == "string" and type(v) == "string" then
+            env[k] = v
+        end
+    end
+    env["MSBUILDDISABLENODEREUSE"] = "1"
+    env["DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER"] = "1"
+
+    return cmd, env, run_cfg.cwd
+end
+
+function M.read_build_properties(result_file)
+    if not result_file or result_file == "" then
+        return nil
+    end
+    local f = io.open(result_file, "r")
+    if not f then
+        return nil
+    end
+    local raw = f:read("*a")
+    f:close()
+
+    local ok, data = pcall(vim.json.decode, raw)
+    if not ok or type(data) ~= "table" or type(data.Properties) ~= "table" then
+        return nil
+    end
+
+    local p = data.Properties
+    local function as_str(v)
+        return type(v) == "string" and v or ""
+    end
+
+    return {
+        run_command = as_str(p.RunCommand),
+        run_arguments = as_str(p.RunArguments),
+        target_path = as_str(p.TargetPath),
+        start_arguments = as_str(p.StartArguments),
+    }
+end
+
+function M.build_direct_command_and_env(run_cfg, props)
+    local dotnet_bin = (config.current.orchestration and config.current.orchestration.dotnet_cmd)
+        or require("csharp-explorer.runner").resolve_dotnet()
+    local env = apply_launch_profile_env(run_cfg)
+
+    local rcmd = props and props.run_command or ""
+    local rargs = props and props.run_arguments or ""
+    local tpath = props and props.target_path or ""
+    local sargs = props and props.start_arguments or ""
+
+    local base = vim.fn.fnamemodify(rcmd, ":t"):lower()
+    local is_dotnet = (base == "dotnet" or base == "dotnet.exe")
+
+    local cmd = {}
+    if rcmd ~= "" and not is_dotnet and uv.fs_stat(rcmd) then
+        cmd[#cmd + 1] = rcmd
+        local parsed_rargs = parse_args(rargs)
+        for _, arg in ipairs(parsed_rargs) do
+            cmd[#cmd + 1] = arg
+        end
+        if run_cfg.args then
+            for _, arg in ipairs(run_cfg.args) do
+                cmd[#cmd + 1] = arg
+            end
+        end
+    elseif tpath ~= "" and uv.fs_stat(tpath) then
+        if tpath:lower():sub(-4) == ".dll" then
+            cmd[#cmd + 1] = dotnet_bin
+            cmd[#cmd + 1] = "exec"
+            cmd[#cmd + 1] = tpath
+        else
+            cmd[#cmd + 1] = tpath
+        end
+        local parsed_sargs = parse_args(sargs)
+        for _, arg in ipairs(parsed_sargs) do
+            cmd[#cmd + 1] = arg
+        end
+        if run_cfg.args then
+            for _, arg in ipairs(run_cfg.args) do
+                cmd[#cmd + 1] = arg
+            end
+        end
+    else
+        cmd[#cmd + 1] = dotnet_bin
+        cmd[#cmd + 1] = "run"
+        cmd[#cmd + 1] = "--no-build"
+        cmd[#cmd + 1] = "--no-launch-profile"
+        cmd[#cmd + 1] = "--project"
+        cmd[#cmd + 1] = run_cfg.project_path
+        if run_cfg.args and #run_cfg.args > 0 then
+            cmd[#cmd + 1] = "--"
+            for _, arg in ipairs(run_cfg.args) do
+                cmd[#cmd + 1] = arg
+            end
+        end
+    end
+
+    return cmd, env, run_cfg.cwd
+end
+
 return M

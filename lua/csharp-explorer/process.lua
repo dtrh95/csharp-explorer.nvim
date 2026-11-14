@@ -10,6 +10,8 @@ local M = {
 
 local subscribers = {}
 local deferred_timers = {}
+local build_queue = {}
+local active_build = nil
 
 local MAX_REMAINDER_BYTES = 64 * 1024
 local MAX_LINE_CHARS = 4096
@@ -286,6 +288,238 @@ function M.clear_session_log(id)
     return false
 end
 
+local function cancel_kill_timer(session)
+    if session and session.kill_timer then
+        pcall(session.kill_timer.stop, session.kill_timer)
+        pcall(session.kill_timer.close, session.kill_timer)
+        session.kill_timer = nil
+    end
+end
+
+local function cleanup_build_result_file(session)
+    if session and session.build_result_file then
+        pcall(uv.fs_unlink, session.build_result_file)
+        session.build_result_file = nil
+    end
+end
+
+local function flush_stream_remainders(session)
+    if not session then
+        return
+    end
+    if session.stdout_rem and session.stdout_rem ~= "" then
+        session.ring_buffer:push(sanitize_line(session.stdout_rem))
+        session.stdout_rem = ""
+    end
+    if session.stderr_rem and session.stderr_rem ~= "" then
+        session.ring_buffer:push(sanitize_line(session.stderr_rem))
+        session.stderr_rem = ""
+    end
+end
+
+local function signal_process_tree(pid, immediate, session)
+    if not pid then
+        return
+    end
+    if vim.fn.has("win32") == 1 then
+        pcall(vim.fn.system, "taskkill /PID " .. tostring(pid) .. " /T /F")
+        return
+    end
+    pcall(uv.kill, -pid, 15)
+    pcall(uv.kill, pid, 15)
+    if immediate then
+        pcall(uv.kill, -pid, 9)
+        pcall(uv.kill, pid, 9)
+        return
+    end
+    local timeout = (config.current.run and config.current.run.terminate_timeout_ms) or 1500
+    local timer = uv.new_timer()
+    if timer then
+        if session then
+            session.kill_timer = timer
+        end
+        timer:start(timeout, 0, function()
+            pcall(uv.kill, -pid, 9)
+            pcall(uv.kill, pid, 9)
+            pcall(timer.stop, timer)
+            pcall(timer.close, timer)
+            if session and session.kill_timer == timer then
+                session.kill_timer = nil
+            end
+        end)
+    end
+end
+
+local function finalize_session(session, status, exit_code, exit_signal)
+    cancel_kill_timer(session)
+    cleanup_build_result_file(session)
+    flush_stream_remainders(session)
+
+    session.exit_code = exit_code
+    session.exit_signal = exit_signal
+    session.ended_at = os.time()
+    session.stage = "exited"
+    session.status = status
+    session.handle = nil
+    session.build_handle = nil
+    session.build_pid = nil
+
+    dispatch_event("exited", session)
+
+    if session.pending_restart then
+        local next_run = session.pending_restart
+        session.pending_restart = nil
+        vim.schedule(function()
+            M.start(next_run.cfg or session.config, next_run.opts)
+        end)
+    end
+end
+
+local function spawn_runtime_process(session, cmd, env, cwd, is_direct_start)
+    local function on_stdout(err, data)
+        if not err and data and data ~= "" then
+            process_stream_data(session, data, false)
+        end
+    end
+
+    local function on_stderr(err, data)
+        if not err and data and data ~= "" then
+            process_stream_data(session, data, true)
+        end
+    end
+
+    local function on_exit(obj)
+        local status = (session.user_stopped or obj.code == 0) and "stopped" or "failed"
+        if session.user_stopped and session.pid and vim.fn.has("win32") == 0 then
+            pcall(uv.kill, -session.pid, 9)
+        end
+        finalize_session(session, status, obj.code, obj.signal)
+    end
+
+    local ok_spawn, handle = pcall(vim.system, cmd, {
+        cwd = cwd,
+        env = env,
+        detach = true,
+        stdout = on_stdout,
+        stderr = on_stderr,
+    }, on_exit)
+
+    if not ok_spawn or not handle then
+        session.ring_buffer:push("Failed to start process: " .. tostring(handle))
+        finalize_session(session, "failed", -1, nil)
+        return session
+    end
+
+    session.handle = handle
+    session.pid = handle.pid
+    session.status = "running"
+    session.stage = "running"
+
+    if is_direct_start then
+        dispatch_event("started", session)
+    else
+        dispatch_event("status_changed", session)
+    end
+    return session
+end
+
+local function pump_build_queue()
+    if active_build ~= nil then
+        return
+    end
+
+    while #build_queue > 0 do
+        local item = table.remove(build_queue, 1)
+        local session = item.session
+        if session and session.status == "starting" and not session.user_stopped and session.stage == "queued" then
+            local result_file = vim.fn.tempname() .. ".json"
+            local ok_prep, bcmd, benv, bcwd = pcall(run_config.build_prepare_command, session.config, result_file)
+            if not ok_prep or not bcmd then
+                pcall(uv.fs_unlink, result_file)
+                session.ring_buffer:push("Failed to prepare build command: " .. tostring(bcmd))
+                finalize_session(session, "failed", -1, nil)
+                vim.schedule(pump_build_queue)
+                return
+            end
+
+            active_build = session
+            session.stage = "building"
+            session.build_result_file = result_file
+            dispatch_event("status_changed", session)
+
+            local function on_b_stdout(err, data)
+                if not err and data and data ~= "" then
+                    process_stream_data(session, data, false)
+                end
+            end
+
+            local function on_b_stderr(err, data)
+                if not err and data and data ~= "" then
+                    process_stream_data(session, data, true)
+                end
+            end
+
+            local function on_build_exit(obj)
+                local bpid = session.build_pid
+                session.build_handle = nil
+                session.build_pid = nil
+                active_build = nil
+
+                local props = run_config.read_build_properties(result_file)
+                cleanup_build_result_file(session)
+
+                vim.schedule(pump_build_queue)
+
+                if session.user_stopped or session.status == "stopped" or session.stage == "exited" then
+                    if bpid and vim.fn.has("win32") == 0 then
+                        pcall(uv.kill, -bpid, 9)
+                        pcall(uv.kill, bpid, 9)
+                    end
+                    if session.stage ~= "exited" then
+                        finalize_session(session, "stopped", obj.code, obj.signal)
+                    end
+                    return
+                end
+
+                if obj.code ~= 0 then
+                    finalize_session(session, "failed", obj.code, obj.signal)
+                    return
+                end
+
+                local ok_cmd, rcmd, renv, rcwd = pcall(run_config.build_direct_command_and_env, session.config, props)
+                if not ok_cmd or not rcmd then
+                    session.ring_buffer:push("Failed to resolve direct command: " .. tostring(rcmd))
+                    finalize_session(session, "failed", -1, nil)
+                    return
+                end
+
+                flush_stream_remainders(session)
+                spawn_runtime_process(session, rcmd, renv, rcwd, false)
+            end
+
+            local ok_bspawn, bhandle = pcall(vim.system, bcmd, {
+                cwd = bcwd,
+                env = benv,
+                detach = true,
+                stdout = on_b_stdout,
+                stderr = on_b_stderr,
+            }, on_build_exit)
+
+            if not ok_bspawn or not bhandle then
+                active_build = nil
+                session.ring_buffer:push("Failed to start build process: " .. tostring(bhandle))
+                finalize_session(session, "failed", -1, nil)
+                vim.schedule(pump_build_queue)
+                return
+            end
+
+            session.build_handle = bhandle
+            session.build_pid = bhandle.pid
+            return
+        end
+    end
+end
+
 function M.start(run_cfg, opts)
     opts = opts or {}
     local id = run_cfg.id
@@ -309,9 +543,13 @@ function M.start(run_cfg, opts)
         id = id,
         config = run_cfg,
         status = "starting",
+        stage = "queued",
         user_stopped = false,
         pid = nil,
         handle = nil,
+        build_pid = nil,
+        build_handle = nil,
+        build_result_file = nil,
         exit_code = nil,
         exit_signal = nil,
         started_at = os.time(),
@@ -340,84 +578,16 @@ function M.start(run_cfg, opts)
         M.session_order[#M.session_order + 1] = id
     end
 
-    local cmd, env, cwd = run_config.build_command_and_env(run_cfg, opts)
-
-    local function on_stdout(err, data)
-        if not err and data and data ~= "" then
-            process_stream_data(session, data, false)
-        end
+    if run_cfg.command_type == "Executable" or hot_reload then
+        local cmd, env, cwd = run_config.build_command_and_env(run_cfg, opts)
+        return spawn_runtime_process(session, cmd, env, cwd, true)
     end
 
-    local function on_stderr(err, data)
-        if not err and data and data ~= "" then
-            process_stream_data(session, data, true)
-        end
-    end
-
-    local function on_exit(obj)
-        if session.kill_timer then
-            pcall(session.kill_timer.stop, session.kill_timer)
-            pcall(session.kill_timer.close, session.kill_timer)
-            session.kill_timer = nil
-        end
-
-        session.exit_code = obj.code
-        session.exit_signal = obj.signal
-        session.ended_at = os.time()
-        session.handle = nil
-
-        if session.stdout_rem ~= "" then
-            session.ring_buffer:push(sanitize_line(session.stdout_rem))
-            session.stdout_rem = ""
-        end
-        if session.stderr_rem ~= "" then
-            session.ring_buffer:push(sanitize_line(session.stderr_rem))
-            session.stderr_rem = ""
-        end
-
-        if session.user_stopped or obj.code == 0 then
-            session.status = "stopped"
-        else
-            session.status = "failed"
-        end
-
-        if session.user_stopped and session.pid and vim.fn.has("win32") == 0 then
-            pcall(uv.kill, -session.pid, 9)
-        end
-
-        dispatch_event("exited", session)
-
-        if session.pending_restart then
-            local next_run = session.pending_restart
-            session.pending_restart = nil
-            vim.schedule(function()
-                M.start(next_run.cfg or session.config, next_run.opts)
-            end)
-        end
-    end
-
-    local ok_spawn, handle = pcall(vim.system, cmd, {
-        cwd = cwd,
-        env = env,
-        detach = true,
-        stdout = on_stdout,
-        stderr = on_stderr,
-    }, on_exit)
-
-    if not ok_spawn or not handle then
-        session.status = "failed"
-        session.exit_code = -1
-        session.ended_at = os.time()
-        session.ring_buffer:push("Failed to start process: " .. tostring(handle))
-        dispatch_event("exited", session)
-        return session
-    end
-
-    session.handle = handle
-    session.pid = handle.pid
-    session.status = "running"
-
+    session.status = "starting"
+    session.stage = "queued"
+    build_queue[#build_queue + 1] = { session = session, opts = opts }
     dispatch_event("started", session)
+    pump_build_queue()
     return session
 end
 
@@ -473,10 +643,31 @@ function M.stop(id, opts)
     if not opts.single and session.compound_id and session.stop_together then
         return M.stop_compound(session.compound_id)
     end
-    if not session.handle then
+    if session.status == "stopping" or session.status == "stopped" or session.status == "failed" then
         return false
     end
-    if session.status == "stopping" or session.status == "stopped" or session.status == "failed" then
+
+    if session.stage == "queued" then
+        for i, item in ipairs(build_queue) do
+            if item.session == session then
+                table.remove(build_queue, i)
+                break
+            end
+        end
+        session.user_stopped = true
+        finalize_session(session, "stopped", nil, nil)
+        return true
+    end
+
+    if session.stage == "building" then
+        session.user_stopped = true
+        session.status = "stopping"
+        dispatch_event("status_changed", session)
+        signal_process_tree(session.build_pid, false, session)
+        return true
+    end
+
+    if not session.handle then
         return false
     end
 
@@ -484,33 +675,7 @@ function M.stop(id, opts)
     session.status = "stopping"
     dispatch_event("status_changed", session)
 
-    local pid = session.pid
-    if not pid then
-        return true
-    end
-
-    if vim.fn.has("win32") == 1 then
-        vim.system({ "taskkill", "/PID", tostring(pid), "/T", "/F" })
-    else
-        pcall(uv.kill, -pid, 15)
-        pcall(uv.kill, pid, 15)
-
-        local timeout = (config.current.run and config.current.run.terminate_timeout_ms) or 1500
-        local timer = uv.new_timer()
-        session.kill_timer = timer
-        if timer then
-            timer:start(timeout, 0, function()
-                pcall(uv.kill, -pid, 9)
-                pcall(uv.kill, pid, 9)
-                pcall(timer.stop, timer)
-                pcall(timer.close, timer)
-                if session.kill_timer == timer then
-                    session.kill_timer = nil
-                end
-            end)
-        end
-    end
-
+    signal_process_tree(session.pid, false, session)
     return true
 end
 
@@ -570,25 +735,28 @@ end
 
 function M.shutdown()
     cancel_deferred_timers(nil)
+    build_queue = {}
     for _, s in pairs(M.sessions) do
+        s.user_stopped = true
         s.pending_restart = nil
-        if s.pid and (s.status == "starting" or s.status == "running" or s.status == "stopping") then
-            if s.kill_timer then
-                pcall(s.kill_timer.stop, s.kill_timer)
-                pcall(s.kill_timer.close, s.kill_timer)
-                s.kill_timer = nil
-            end
-            if vim.fn.has("win32") == 1 then
-                pcall(vim.fn.system, "taskkill /PID " .. tostring(s.pid) .. " /T /F")
-            else
-                pcall(uv.kill, -s.pid, 15)
-                pcall(uv.kill, s.pid, 15)
-                pcall(uv.kill, -s.pid, 9)
-                pcall(uv.kill, s.pid, 9)
-            end
-            s.status = "stopped"
+        cancel_kill_timer(s)
+        cleanup_build_result_file(s)
+
+        if s.build_pid then
+            signal_process_tree(s.build_pid, true, s)
+            s.build_handle = nil
+            s.build_pid = nil
         end
+
+        if s.pid and (s.status == "starting" or s.status == "running" or s.status == "stopping") then
+            signal_process_tree(s.pid, true, s)
+            s.handle = nil
+        end
+
+        s.status = "stopped"
+        s.stage = "exited"
     end
+    active_build = nil
 end
 
 return M

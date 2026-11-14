@@ -50,8 +50,29 @@ _Focus: Deep integration with LSP and build tools._
 - [x] **Search Within Solution**:
   - Global symbol search scoped to the explorer tree.
 
+## Phase 5: Run Orchestration & Environment Management
+
+_Focus: Multi-project execution, launch profiles, compound runs, and project reload._
+
+- [x] **Launch Settings Discovery and Execution**:
+  - Recursive `launchSettings.json` discovery that skips build output and hidden directories.
+  - Strips JSONC comments, trailing commas, and UTF-8 byte order marks.
+  - Runs projects with `dotnet run --no-launch-profile` and applies profile environment variables, URLs, working directories, and arguments.
+  - Supports `dotnet watch --non-interactive` hot reload.
+- [x] **Multi-Process Runtime and Rider-Style Tool Window**:
+  - Asynchronous process runtime with process-group termination and escalation timers.
+  - Bottom tool window docked below the editor column with process tabs, status icons, listening URLs, and bounded ring-buffer logs.
+  - Live tree status badges for listening ports and exit codes.
+- [x] **Compound Run Configurations**:
+  - Multi-project launch bundles stored in `.csharp-explorer/compounds.json` or Lua setup config.
+  - Interactive manager to run, create, edit, or delete compound configurations.
+- [x] **Project Reload and LSP Recovery**:
+  - Re-parses solutions while keeping expanded folders open.
+  - Writes modified solution buffers and clears metadata caches.
+  - Restarts active C# language servers and resurrects crashed servers.
+
 ---
 
 ## Progress Tracking
 
-Completed **Phase 0 (Foundation)**, **Phase 1 (Project Metadata & Dependencies)**, **Phase 2 (Enhanced UI & Visual Feedback)**, **Phase 3 (Project Orchestration)**, and **Phase 4 (Intelligence & Refactoring)**.
+Completed **Phase 0 (Foundation)**, **Phase 1 (Project Metadata & Dependencies)**, **Phase 2 (Enhanced UI & Visual Feedback)**, **Phase 3 (Project Orchestration)**, **Phase 4 (Intelligence & Refactoring)**, and **Phase 5 (Run Orchestration & Environment Management)**.

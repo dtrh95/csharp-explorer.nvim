@@ -24,6 +24,11 @@ A lightweight C# Solution Explorer for Neovim that renders `.sln` and `.slnx` hi
 - **Live Metadata Sync**: Refreshes dependency nodes automatically on `BufWritePost` for `*.csproj`, `*.props`, `*.targets`, and `project.assets.json` while keeping expanded folders open.
 - **Finding Files**: Locate the active source buffer or `.csproj` in the solution tree with `:CSharpExplorerFindFile`.
 - **Gitignore Filtering and Clipboard**: Toggle gitignored files with `I` and copy, cut, or paste project files directly in the tree.
+- **Run Profiles and Orchestration**: Run project targets with `u` or select launch profiles with `U`. Discovers `launchSettings.json` across project subdirectories, strips JSONC comments and UTF-8 byte order marks, and runs projects with `dotnet run --no-launch-profile`. Applies profile environment variables, URLs, arguments, and working directories. Supports `dotnet watch --non-interactive` hot reload from `U`.
+- **Rider-Style Run Tool Window**: Toggle the bottom run tool window with `L` or `:CSharpExplorerRunWindow`. The window opens below the editor column and keeps the explorer sidebar at full height. Shows process tabs (`g1` to `g9`, `]`, `[`), status icons, bounded ring-buffer logs, detected listening URLs (`<CR>` or `gx` opens the browser), follow-tail toggle (`f`), and single or global stop and restart keys.
+- **Tree Process Status Badges**: Projects with active processes show right-aligned badges in the explorer tree, such as `● :5189` for listening web services, `◐ starting`, or `▲ exit 1` on failure.
+- **Compound Run Configurations**: Group multiple runnable projects into compound bundles in `.csharp-explorer/compounds.json` or Lua setup config. Press `gc` or run `:CSharpExplorerCompoundManage` to run, create, edit, or delete compounds.
+- **Project Reload and LSP Recovery**: Press `gR` or run `:CSharpExplorerReloadProjects` to reload all projects in the solution. Writes modified solution buffers, clears metadata and build diagnostics, re-parses the solution while keeping expanded folders open, rebuilds the diagnostic index, restarts active C# language servers, and resurrects crashed language servers across loaded C# buffers.
 
 ## Prerequisites
 
@@ -76,6 +81,7 @@ require("csharp-explorer").setup({
         css_file = " ",
         xaml_file = "󰙳 ",
         resx_file = "󰗀 ",
+        launch_settings = " ",
         dependencies = "󰆧 ",
         package_group = "󰏗 ",
         package = "󰏗 ",
@@ -127,6 +133,15 @@ require("csharp-explorer").setup({
         close_quickfix_on_success = false,
         output_max_lines = 2000,
     },
+    run = {
+        default_profile = nil,
+        focus_on_run = false,
+        window_height = 12,
+        max_log_lines = 5000,
+        auto_scroll = true,
+        terminate_timeout_ms = 1500,
+        compounds = {},
+    },
     filter = {
         gitignored = true,
     },
@@ -174,6 +189,11 @@ require("csharp-explorer").setup({
         search_text = "s",
         search_symbols = "S",
         find_files = "f",
+        run = "u",
+        run_select = "U",
+        run_window = "L",
+        manage_compounds = "gc",
+        reload_all = "gR",
     },
 })
 ```
@@ -207,16 +227,26 @@ require("csharp-explorer").setup({
 - `:CSharpExplorerRefresh`: Re-parse the solution and refresh expanded nodes.
 - `:CSharpExplorerExpandAll`: Expand all solution and project folders.
 - `:CSharpExplorerCollapseAll`: Collapse all nodes below the solution root.
+- `:CSharpExplorerRun`: Run the project or profile for the focused target.
+- `:CSharpExplorerRunSelect`: Select and run a project launch profile or compound configuration.
+- `:CSharpExplorerRunStop`: Stop the active process for the focused project or current run window session.
+- `:CSharpExplorerRunStopAll`: Stop all running processes across the solution.
+- `:CSharpExplorerRunRestart`: Restart the active process for the focused project or current run window session.
+- `:CSharpExplorerRunWindow`: Toggle the Rider-style bottom run tool window.
+- `:CSharpExplorerCompound`: Run a compound launch configuration by name.
+- `:CSharpExplorerCompoundManage`: Open the interactive compound configuration manager.
+- `:CSharpExplorerReloadProjects`: Reload all projects, refresh solution tree expansion, and recover crashed C# language servers.
 
 ## Events
 
-Listen to Neovim `User` autocommands to react when the plugin is enabled or disabled:
+Listen to Neovim `User` autocommands to react when projects reload or plugin state changes:
 
 ```lua
 vim.api.nvim_create_autocmd("User", {
-    pattern = "CSharpExplorerEnable",
-    callback = function()
-        print("CSharpExplorer is active")
+    pattern = "CSharpExplorerProjectsReloaded",
+    callback = function(ev)
+        local data = ev.data
+        print(string.format("Reloaded %d projects in %dms", data.projects_count, data.elapsed_ms))
     end,
 })
 ```

@@ -83,6 +83,10 @@ M.defaults = {
         inject_usings_on_move = true,
         save_modified_buffers = true,
     },
+    search = {
+        picker = "auto",
+        symbol_source = "hybrid",
+    },
     ui = {
         width = 30,
         sync_nvim_tree_width = true,
@@ -112,6 +116,10 @@ M.defaults = {
         action_menu = "m",
         task_output = "O",
         cancel_task = "X",
+        sync_namespace = "N",
+        search_text = "s",
+        search_symbols = "S",
+        find_files = "f",
     },
 }
 

@@ -130,6 +130,26 @@ function M.apply(state)
             require("csharp-explorer.runner").cancel()
         end, opts)
     end
+    if km.sync_namespace then
+        bind_keys(km.sync_namespace, function()
+            require("csharp-explorer.actions.namespace").sync_target(state)
+        end, opts)
+    end
+    if km.search_text then
+        bind_keys(km.search_text, function()
+            require("csharp-explorer.actions.search").grep(state)
+        end, opts)
+    end
+    if km.search_symbols then
+        bind_keys(km.search_symbols, function()
+            require("csharp-explorer.actions.search").symbols(state)
+        end, opts)
+    end
+    if km.find_files then
+        bind_keys(km.find_files, function()
+            require("csharp-explorer.actions.search").files(state)
+        end, opts)
+    end
 end
 
 return M

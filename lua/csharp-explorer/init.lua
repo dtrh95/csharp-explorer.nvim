@@ -302,6 +302,34 @@ function M.cancel_task()
     return require("csharp-explorer.runner").cancel()
 end
 
+function M.create(opts)
+    return require("csharp-explorer.actions.refactor").create(M, opts)
+end
+
+function M.rename(opts)
+    return require("csharp-explorer.actions.refactor").rename(M, opts)
+end
+
+function M.delete(opts)
+    return require("csharp-explorer.actions.refactor").delete(M, opts)
+end
+
+function M.sync_namespace(opts)
+    return require("csharp-explorer.actions.namespace").sync_target(M, opts)
+end
+
+function M.search_text(opts)
+    return require("csharp-explorer.actions.search").grep(M, opts)
+end
+
+function M.search_symbols(opts)
+    return require("csharp-explorer.actions.search").symbols(M, opts)
+end
+
+function M.find_files(opts)
+    return require("csharp-explorer.actions.search").files(M, opts)
+end
+
 function M.setup(opts)
     config.setup(opts)
     M.config = config.current
@@ -377,6 +405,27 @@ function M.setup(opts)
     vim.api.nvim_create_user_command("CSharpExplorerCancel", function()
         M.cancel_task()
     end, { desc = "Cancel running task in C# Solution Explorer" })
+    vim.api.nvim_create_user_command("CSharpExplorerCreate", function(cmd_opts)
+        M.create({ name = cmd_opts.args ~= "" and cmd_opts.args or nil })
+    end, { nargs = "?", desc = "Create file or folder in C# Solution Explorer" })
+    vim.api.nvim_create_user_command("CSharpExplorerRename", function(cmd_opts)
+        M.rename({ new_name = cmd_opts.args ~= "" and cmd_opts.args or nil })
+    end, { nargs = "?", desc = "Safe rename target in C# Solution Explorer" })
+    vim.api.nvim_create_user_command("CSharpExplorerDelete", function()
+        M.delete()
+    end, { desc = "Safe delete target in C# Solution Explorer" })
+    vim.api.nvim_create_user_command("CSharpExplorerSyncNamespace", function()
+        M.sync_namespace()
+    end, { desc = "Sync namespace for target in C# Solution Explorer" })
+    vim.api.nvim_create_user_command("CSharpExplorerSearchText", function(cmd_opts)
+        M.search_text({ query = cmd_opts.args ~= "" and cmd_opts.args or nil })
+    end, { nargs = "?", desc = "Search text in C# solution" })
+    vim.api.nvim_create_user_command("CSharpExplorerSearchSymbols", function(cmd_opts)
+        M.search_symbols({ query = cmd_opts.args ~= "" and cmd_opts.args or nil })
+    end, { nargs = "?", desc = "Search symbols in C# solution" })
+    vim.api.nvim_create_user_command("CSharpExplorerFindFiles", function()
+        M.find_files()
+    end, { desc = "Find files in C# solution" })
 
     if not M._events_bound then
         M._events_bound = true

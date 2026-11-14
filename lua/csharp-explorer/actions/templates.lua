@@ -532,6 +532,42 @@ function M.action_menu(state)
             require("csharp-explorer.actions.properties").open(state)()
         end,
     })
+    table.insert(items, {
+        label = "Safe Rename...",
+        action = function()
+            require("csharp-explorer.actions.refactor").rename(state)
+        end,
+    })
+    table.insert(items, {
+        label = "Safe Delete...",
+        action = function()
+            require("csharp-explorer.actions.refactor").delete(state)
+        end,
+    })
+    table.insert(items, {
+        label = "Sync Namespace",
+        action = function()
+            require("csharp-explorer.actions.namespace").sync_target(state)
+        end,
+    })
+    table.insert(items, {
+        label = "Search Text in Solution...",
+        action = function()
+            require("csharp-explorer.actions.search").grep(state)
+        end,
+    })
+    table.insert(items, {
+        label = "Search Symbols in Solution...",
+        action = function()
+            require("csharp-explorer.actions.search").symbols(state)
+        end,
+    })
+    table.insert(items, {
+        label = "Find Files in Solution...",
+        action = function()
+            require("csharp-explorer.actions.search").files(state)
+        end,
+    })
 
     vim.ui.select(items, {
         prompt = "CSharp Explorer Actions:",

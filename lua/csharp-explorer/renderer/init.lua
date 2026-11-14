@@ -6,6 +6,7 @@ local clipboard = require("csharp-explorer.actions.clipboard")
 local M = {}
 
 M.line_to_node = {}
+M.process_ns_id = vim.api.nvim_create_namespace("CSharpExplorerProcess")
 
 local function ensure_hl_groups()
     vim.api.nvim_set_hl(0, "CSharpExplorerCut", {
@@ -148,6 +149,70 @@ function M.render(state)
 
     if package.loaded["csharp-explorer.diagnostics"] then
         require("csharp-explorer.diagnostics").render_extmarks(state)
+    end
+
+    M.render_process_badges(state)
+end
+
+function M.render_process_badges(state)
+    if not state or not state.buf or not vim.api.nvim_buf_is_valid(state.buf) then
+        return
+    end
+
+    vim.api.nvim_buf_clear_namespace(state.buf, M.process_ns_id, 0, -1)
+
+    local ok_proc, process = pcall(require, "csharp-explorer.process")
+    if not ok_proc then
+        return
+    end
+
+    for line_num, node in pairs(M.line_to_node) do
+        if node._type == "project" and node._path then
+            local sessions = process.get_project_sessions(node._path)
+            if #sessions > 0 then
+                local best_session = nil
+                for _, s in ipairs(sessions) do
+                    if s.status == "running" then
+                        best_session = s
+                        break
+                    elseif s.status == "starting" or s.status == "stopping" then
+                        best_session = s
+                    elseif not best_session then
+                        best_session = s
+                    end
+                end
+
+                if best_session and best_session.status ~= "stopped" then
+                    local text = ""
+                    local hl = "Comment"
+                    if best_session.status == "running" then
+                        hl = "DiagnosticOk"
+                        local port = nil
+                        if best_session.detected_urls and #best_session.detected_urls > 0 then
+                            port = best_session.detected_urls[1]:match(":(%d+)")
+                        end
+                        text = port and string.format("● :%s ", port) or "● running "
+                    elseif best_session.status == "starting" then
+                        hl = "DiagnosticWarn"
+                        text = "◐ starting "
+                    elseif best_session.status == "stopping" then
+                        hl = "DiagnosticWarn"
+                        text = "◌ stopping "
+                    elseif best_session.status == "failed" then
+                        hl = "DiagnosticError"
+                        text = string.format("▲ exit %s ", tostring(best_session.exit_code or 1))
+                    end
+
+                    if text ~= "" then
+                        pcall(vim.api.nvim_buf_set_extmark, state.buf, M.process_ns_id, line_num - 1, 0, {
+                            virt_text = { { text, hl } },
+                            virt_text_pos = "right_align",
+                            priority = 160,
+                        })
+                    end
+                end
+            end
+        end
     end
 end
 

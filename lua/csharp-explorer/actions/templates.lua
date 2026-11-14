@@ -507,6 +507,36 @@ function M.action_menu(state)
         end,
     })
     table.insert(items, {
+        label = "Debug Project (D)",
+        action = function()
+            require("csharp-explorer.actions.debug").debug_target(state)
+        end,
+    })
+    table.insert(items, {
+        label = "Debug Profile / Compound... (gD)",
+        action = function()
+            require("csharp-explorer.actions.debug").select_debug_profile(state)
+        end,
+    })
+    table.insert(items, {
+        label = "Attach Debugger...",
+        action = function()
+            require("csharp-explorer.actions.debug").attach_debugger(state)
+        end,
+    })
+    table.insert(items, {
+        label = "Debug Unit Tests (gT)",
+        action = function()
+            require("csharp-explorer.actions.test").debug_test(state)
+        end,
+    })
+    table.insert(items, {
+        label = "Toggle Debug Window (M)",
+        action = function()
+            require("csharp-explorer.ui.debug_window").toggle(state)
+        end,
+    })
+    table.insert(items, {
         label = "Manage Compounds (gc)",
         action = function()
             require("csharp-explorer.compound").manage_compounds(state)

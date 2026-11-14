@@ -26,7 +26,11 @@ A lightweight C# Solution Explorer for Neovim that renders `.sln` and `.slnx` hi
 - **Gitignore Filtering and Clipboard**: Toggle gitignored files with `I` and copy, cut, or paste project files directly in the tree.
 - **Run Profiles and Orchestration**: Run project targets with `u` or select launch profiles with `U`. Discovers `launchSettings.json` across project subdirectories, strips JSONC comments and UTF-8 byte order marks, and runs projects with `dotnet run --no-launch-profile`. Applies profile environment variables, URLs, arguments, and working directories. Supports `dotnet watch --non-interactive` hot reload from `U`.
 - **Rider-Style Run Tool Window**: Toggle the bottom run tool window with `L` or `:CSharpExplorerRunWindow`. The window opens below the editor column and keeps the explorer sidebar at full height. Shows process tabs (`g1` to `g9`, `]`, `[`), status icons, bounded ring-buffer logs, detected listening URLs (`<CR>` or `gx` opens the browser), follow-tail toggle (`f`), and single or global stop and restart keys.
-- **Tree Process Status Badges**: Projects with active processes show right-aligned badges in the explorer tree, such as `● :5189` for listening web services, `◐ starting`, or `▲ exit 1` on failure.
+- **JetBrains Rider-Style Debugger**: Launch projects in `netcoredbg` with `D` or select launch profiles with `gD`. Toggle the Rider-style bottom debug tool window with `M` or `:CSharpExplorerDebugWindow`. Supports multi-session tabs, view switching between Debugger, Console, and Breakpoints views, exception banners on uncaught exceptions, expandable watch expressions, expandable scope variables with property inspection, and interactive call stack navigation.
+- **Run-to-Attach Debugging**: Press `d` inside the Run Tool Window to attach `netcoredbg` to the active running process without restarting the service. Detaching leaves the service alive and serving requests.
+- **Unit Test Debugging**: Debug the nearest test method or test class with `:CSharpExplorerTestDebugNearest` or debug target tests with `gT`. Uses `VSTEST_HOST_DEBUG=1` to attach to the test host and pause on breakpoints in test code.
+- **Mixed Run and Debug Compounds**: Group background run services and foreground debugged services in `.csharp-explorer/compounds.json` or Lua configuration. Compounds serialize background builds and manage simultaneous processes with unified shutdown.
+- **Tree Process Status Badges**: Projects with active processes show right-aligned badges in the explorer tree, such as `● :5189` for listening web services, `● debug` for debugged sessions, `⏸ L21` for paused breakpoints, `◐ building`, or `▲ exit 1` on failure.
 - **Compound Run Configurations**: Group multiple runnable projects into compound bundles in `.csharp-explorer/compounds.json` or Lua setup config. Press `gc` or run `:CSharpExplorerCompoundManage` to run, create, edit, or delete compounds.
 - **Project Reload and LSP Recovery**: Press `gR` or run `:CSharpExplorerReloadProjects` to reload all projects in the solution. Writes modified solution buffers, clears metadata and build diagnostics, re-parses the solution while keeping expanded folders open, rebuilds the diagnostic index, restarts active C# language servers, and resurrects crashed language servers across loaded C# buffers.
 
@@ -34,6 +38,8 @@ A lightweight C# Solution Explorer for Neovim that renders `.sln` and `.slnx` hi
 
 - Neovim 0.9.0+
 - [.NET SDK](https://dotnet.microsoft.com/) 6.0+ (`dotnet` binary in `PATH` or configured via `orchestration.dotnet_cmd`)
+- [mfussenegger/nvim-dap](https://github.com/mfussenegger/nvim-dap) (optional, required for debugging)
+- [netcoredbg](https://github.com/Samsung/netcoredbg) (optional, required for debugging; discovered from `PATH` or Mason)
 - [nvim-tree/nvim-tree.lua](https://github.com/nvim-tree/nvim-tree.lua) (optional)
 - [nvim-tree/nvim-web-devicons](https://github.com/nvim-tree/nvim-web-devicons) (optional, for icons)
 
@@ -142,6 +148,16 @@ require("csharp-explorer").setup({
         terminate_timeout_ms = 1500,
         compounds = {},
     },
+    debug = {
+        enabled = true,
+        auto_open_window = true,
+        focus_on_break = true,
+        window_height = 14,
+        stop_at_entry = false,
+        just_my_code = true,
+        max_log_lines = 5000,
+        vstest_timeout_ms = 20000,
+    },
     filter = {
         gitignored = true,
     },
@@ -192,6 +208,10 @@ require("csharp-explorer").setup({
         run = "u",
         run_select = "U",
         run_window = "L",
+        debug = "D",
+        debug_select = "gD",
+        debug_test = "gT",
+        debug_window = "M",
         manage_compounds = "gc",
         reload_all = "gR",
     },
@@ -236,6 +256,26 @@ require("csharp-explorer").setup({
 - `:CSharpExplorerCompound`: Run a compound launch configuration by name.
 - `:CSharpExplorerCompoundManage`: Open the interactive compound configuration manager.
 - `:CSharpExplorerReloadProjects`: Reload all projects, refresh solution tree expansion, and recover crashed C# language servers.
+- `:CSharpExplorerDebug`: Launch the project or profile for the focused target in the debugger.
+- `:CSharpExplorerDebugSelect`: Select a debug launch profile, compound, or attach to a running process.
+- `:CSharpExplorerDebugCompound`: Launch a compound debug configuration by name.
+- `:CSharpExplorerDebugAttach`: Attach the debugger to a running .NET process.
+- `:CSharpExplorerDebugWindow`: Toggle the Rider-style bottom debug tool window.
+- `:CSharpExplorerBreakpointToggle`: Toggle a breakpoint at the current cursor line.
+- `:CSharpExplorerBreakpointCondition`: Set or edit a condition on the current line breakpoint.
+- `:CSharpExplorerDebugContinue`: Continue execution in the active debug session.
+- `:CSharpExplorerDebugStepOver`: Step over in the active debug session.
+- `:CSharpExplorerDebugStepInto`: Step into in the active debug session.
+- `:CSharpExplorerDebugStepOut`: Step out in the active debug session.
+- `:CSharpExplorerDebugPause`: Pause execution in the active debug session.
+- `:CSharpExplorerDebugRestart`: Restart the active debug session.
+- `:CSharpExplorerDebugStop`: Stop or detach the active debug session.
+- `:CSharpExplorerDebugStopAll`: Stop all active debug sessions.
+- `:CSharpExplorerDebugEvaluate`: Prompt for a C# expression and evaluate it in the active frame.
+- `:CSharpExplorerDebugAddWatch`: Add a watch expression to the debugger.
+- `:CSharpExplorerTestDebug`: Debug unit tests for the focused target.
+- `:CSharpExplorerTestDebugNearest`: Debug the nearest unit test enclosing the cursor.
+- `:CSharpExplorerTestDebugSelect`: Select and debug a unit test in the current file.
 
 ## Events
 

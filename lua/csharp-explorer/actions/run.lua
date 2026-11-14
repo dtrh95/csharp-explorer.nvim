@@ -207,23 +207,40 @@ function M.run_compound(state, compound_or_name, _opts)
     local stop_together = comp.stop_together ~= false
 
     local started_count = 0
+    local has_debug = false
+    local has_run = false
     for _, item in ipairs(comp.items) do
         local cfg = compound.resolve_item_config(item, all_cfgs, solution_dir)
         if cfg then
             started_count = started_count + 1
-            local proc_opts = {
+            local item_opts = {
                 compound_id = comp.id,
                 stop_together = stop_together,
                 hot_reload = item.hot_reload,
             }
             local delay = item.delay_ms or 0
-            process.schedule_start(delay, cfg, proc_opts)
+            if item.mode == "debug" then
+                has_debug = true
+                local debug_engine = require("csharp-explorer.debug")
+                debug_engine.schedule_start(delay, cfg, item_opts)
+            else
+                has_run = true
+                process.schedule_start(delay, cfg, item_opts)
+            end
         end
     end
 
-    run_window.open(state, {
-        focus = config.current.run and config.current.run.focus_on_run == true,
-    })
+    if has_debug and (not has_run or (config.current.debug and config.current.debug.auto_open_window)) then
+        local ok_dw, dw = pcall(require, "csharp-explorer.ui.debug_window")
+        if ok_dw and dw.open then
+            dw.open(state, { focus = false })
+        end
+    end
+    if has_run then
+        run_window.open(state, {
+            focus = config.current.run and config.current.run.focus_on_run == true,
+        })
+    end
     vim.notify(string.format("Started compound '%s' (%d processes).", comp.name, started_count), vim.log.levels.INFO)
 end
 

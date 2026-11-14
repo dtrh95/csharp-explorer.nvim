@@ -381,6 +381,86 @@ function M.reload_projects(opts)
     return require("csharp-explorer.reload").reload_all(M, opts)
 end
 
+function M.debug_project(opts)
+    return require("csharp-explorer.actions.debug").debug_target(M, opts)
+end
+
+function M.debug_select(opts)
+    return require("csharp-explorer.actions.debug").select_debug_profile(M, opts)
+end
+
+function M.debug_compound(opts)
+    return require("csharp-explorer.actions.debug").debug_compound(M, opts and opts.name, opts)
+end
+
+function M.debug_attach(opts)
+    return require("csharp-explorer.actions.debug").attach_debugger(M, opts)
+end
+
+function M.debug_window_toggle(_opts)
+    return require("csharp-explorer.ui.debug_window").toggle(M)
+end
+
+function M.breakpoint_toggle(opts)
+    return require("csharp-explorer.debug").toggle_breakpoint(opts)
+end
+
+function M.breakpoint_condition(_opts)
+    return require("csharp-explorer.actions.debug").edit_breakpoint_condition()
+end
+
+function M.debug_continue(id)
+    return require("csharp-explorer.debug").continue_session(id)
+end
+
+function M.debug_step_over(id)
+    return require("csharp-explorer.debug").step_over(id)
+end
+
+function M.debug_step_into(id)
+    return require("csharp-explorer.debug").step_into(id)
+end
+
+function M.debug_step_out(id)
+    return require("csharp-explorer.debug").step_out(id)
+end
+
+function M.debug_pause(id)
+    return require("csharp-explorer.debug").pause_session(id)
+end
+
+function M.debug_restart(id, opts)
+    return require("csharp-explorer.debug").restart(id, opts)
+end
+
+function M.debug_stop(id, opts)
+    return require("csharp-explorer.debug").stop(id, opts)
+end
+
+function M.debug_stop_all(opts)
+    return require("csharp-explorer.debug").stop_all(opts)
+end
+
+function M.debug_evaluate(expr, opts, cb)
+    return require("csharp-explorer.debug").evaluate(expr, opts, cb)
+end
+
+function M.debug_add_watch(expr, cb)
+    return require("csharp-explorer.debug").add_watch(expr, cb)
+end
+
+function M.test_debug(opts)
+    return require("csharp-explorer.actions.test").debug_test(M, opts)
+end
+
+function M.test_debug_nearest(opts)
+    return require("csharp-explorer.actions.test").debug_nearest(M, opts)
+end
+
+function M.test_debug_select(opts)
+    return require("csharp-explorer.actions.test").select_and_debug(M, opts)
+end
+
 function M.setup(opts)
     config.setup(opts)
     M.config = config.current
@@ -504,6 +584,66 @@ function M.setup(opts)
     vim.api.nvim_create_user_command("CSharpExplorerReloadProjects", function()
         M.reload_projects()
     end, { desc = "Reload all projects and recover crashed C# LSPs" })
+    vim.api.nvim_create_user_command("CSharpExplorerDebug", function()
+        M.debug_project()
+    end, { desc = "Launch project in debugger" })
+    vim.api.nvim_create_user_command("CSharpExplorerDebugSelect", function()
+        M.debug_select()
+    end, { desc = "Select debug profile, compound, or attach" })
+    vim.api.nvim_create_user_command("CSharpExplorerDebugCompound", function(cmd_opts)
+        M.debug_compound({ name = cmd_opts.args ~= "" and cmd_opts.args or nil })
+    end, { nargs = "?", desc = "Launch debug compound" })
+    vim.api.nvim_create_user_command("CSharpExplorerDebugAttach", function()
+        M.debug_attach()
+    end, { desc = "Attach netcoredbg to running process" })
+    vim.api.nvim_create_user_command("CSharpExplorerDebugWindow", function()
+        M.debug_window_toggle()
+    end, { desc = "Toggle Rider Debug Tool Window" })
+    vim.api.nvim_create_user_command("CSharpExplorerBreakpointToggle", function()
+        M.breakpoint_toggle()
+    end, { desc = "Toggle breakpoint at current line" })
+    vim.api.nvim_create_user_command("CSharpExplorerBreakpointCondition", function()
+        M.breakpoint_condition()
+    end, { desc = "Set condition on breakpoint at current line" })
+    vim.api.nvim_create_user_command("CSharpExplorerDebugContinue", function()
+        M.debug_continue()
+    end, { desc = "Continue debug session" })
+    vim.api.nvim_create_user_command("CSharpExplorerDebugStepOver", function()
+        M.debug_step_over()
+    end, { desc = "Step over in debug session" })
+    vim.api.nvim_create_user_command("CSharpExplorerDebugStepInto", function()
+        M.debug_step_into()
+    end, { desc = "Step into in debug session" })
+    vim.api.nvim_create_user_command("CSharpExplorerDebugStepOut", function()
+        M.debug_step_out()
+    end, { desc = "Step out in debug session" })
+    vim.api.nvim_create_user_command("CSharpExplorerDebugPause", function()
+        M.debug_pause()
+    end, { desc = "Pause debug session" })
+    vim.api.nvim_create_user_command("CSharpExplorerDebugRestart", function()
+        M.debug_restart()
+    end, { desc = "Restart active debug session" })
+    vim.api.nvim_create_user_command("CSharpExplorerDebugStop", function()
+        M.debug_stop()
+    end, { desc = "Stop active debug session" })
+    vim.api.nvim_create_user_command("CSharpExplorerDebugStopAll", function()
+        M.debug_stop_all()
+    end, { desc = "Stop all debug sessions" })
+    vim.api.nvim_create_user_command("CSharpExplorerDebugEvaluate", function()
+        require("csharp-explorer.actions.debug").prompt_evaluate()
+    end, { desc = "Evaluate C# expression in debugger" })
+    vim.api.nvim_create_user_command("CSharpExplorerDebugAddWatch", function()
+        require("csharp-explorer.actions.debug").prompt_add_watch()
+    end, { desc = "Add watch expression to debugger" })
+    vim.api.nvim_create_user_command("CSharpExplorerTestDebug", function()
+        M.test_debug()
+    end, { desc = "Debug unit tests for target" })
+    vim.api.nvim_create_user_command("CSharpExplorerTestDebugNearest", function()
+        M.test_debug_nearest()
+    end, { desc = "Debug nearest test method or class" })
+    vim.api.nvim_create_user_command("CSharpExplorerTestDebugSelect", function()
+        M.test_debug_select()
+    end, { desc = "Select and debug a test method" })
 
     if not M._events_bound then
         M._events_bound = true
@@ -512,7 +652,12 @@ function M.setup(opts)
         vim.api.nvim_create_autocmd("VimLeavePre", {
             group = augroup,
             callback = function()
-                require("csharp-explorer.process").shutdown()
+                pcall(function()
+                    require("csharp-explorer.process").shutdown()
+                end)
+                pcall(function()
+                    require("csharp-explorer.debug").shutdown()
+                end)
             end,
         })
 
@@ -523,6 +668,17 @@ function M.setup(opts)
             if M.is_active and M.buf and vim.api.nvim_buf_is_valid(M.buf) then
                 renderer.render_process_badges(M)
             end
+        end)
+
+        pcall(function()
+            require("csharp-explorer.debug").subscribe(function(event_type)
+                if event_type == "output" then
+                    return
+                end
+                if M.is_active and M.buf and vim.api.nvim_buf_is_valid(M.buf) then
+                    renderer.render_process_badges(M)
+                end
+            end)
         end)
 
         vim.api.nvim_create_autocmd("BufWritePost", {

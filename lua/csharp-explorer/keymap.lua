@@ -165,6 +165,26 @@ function M.apply(state)
             require("csharp-explorer.actions.run").toggle_run_window(state)
         end, opts)
     end
+    if km.debug then
+        bind_keys(km.debug, function()
+            require("csharp-explorer.actions.debug").debug_target(state)
+        end, opts)
+    end
+    if km.debug_select then
+        bind_keys(km.debug_select, function()
+            require("csharp-explorer.actions.debug").select_debug_profile(state)
+        end, opts)
+    end
+    if km.debug_test then
+        bind_keys(km.debug_test, function()
+            require("csharp-explorer.actions.test").debug_test(state)
+        end, opts)
+    end
+    if km.debug_window then
+        bind_keys(km.debug_window, function()
+            require("csharp-explorer.ui.debug_window").toggle(state)
+        end, opts)
+    end
     if km.manage_compounds then
         bind_keys(km.manage_compounds, function()
             require("csharp-explorer.compound").manage_compounds(state)

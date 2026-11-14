@@ -11,15 +11,21 @@ local M = {
 local subscribers = {}
 local deferred_timers = {}
 
+local MAX_REMAINDER_BYTES = 64 * 1024
+local MAX_LINE_CHARS = 4096
+
 local function create_ring_buffer(max_size)
     local buf = {
         _items = {},
         _head = 1,
         _count = 0,
         _max = max_size or 5000,
+        _total_seq = 0,
+        _gen = 0,
     }
 
     function buf:push(item)
+        self._total_seq = self._total_seq + 1
         if self._count < self._max then
             self._count = self._count + 1
             self._items[self._count] = item
@@ -33,6 +39,8 @@ local function create_ring_buffer(max_size)
         self._items = {}
         self._head = 1
         self._count = 0
+        self._total_seq = 0
+        self._gen = self._gen + 1
     end
 
     function buf:get_lines()
@@ -49,6 +57,29 @@ local function create_ring_buffer(max_size)
             out[#out + 1] = self._items[idx]
         end
         return out
+    end
+
+    function buf:get_lines_since(last_seq)
+        if last_seq >= self._total_seq then
+            return {}, self._total_seq, false
+        end
+        local delta = self._total_seq - last_seq
+        if delta >= self._count then
+            return self:get_lines(), self._total_seq, true
+        end
+
+        local out = {}
+        if self._count < self._max then
+            for i = self._count - delta + 1, self._count do
+                out[#out + 1] = self._items[i]
+            end
+        else
+            for k = 0, delta - 1 do
+                local idx = ((self._head - 1 + (self._max - delta) + k) % self._max) + 1
+                out[#out + 1] = self._items[idx]
+            end
+        end
+        return out, self._total_seq, false
     end
 
     return buf
@@ -92,6 +123,52 @@ local function strip_ansi(line)
     return line:gsub("\27%[[0-9;?]*[a-zA-Z]", ""):gsub("\27%].-\7", ""):gsub("\r$", "")
 end
 
+local function sanitize_line(raw_line)
+    local line = raw_line
+    if line:find("\r") then
+        line = line:gsub("\r+$", "")
+        local after_cr = line:match(".*\r([^\r]+)$")
+        if after_cr and after_cr ~= "" then
+            line = after_cr
+        else
+            line = line:gsub("\r", "")
+        end
+    end
+    local clean = strip_ansi(line)
+    if #clean > MAX_LINE_CHARS then
+        local max_cut = MAX_LINE_CHARS - 15
+        local cut = max_cut
+        local steps = 0
+        while cut > 0 and steps < 3 do
+            local b = string.byte(clean, cut)
+            if b and b >= 128 and b < 192 then
+                cut = cut - 1
+                steps = steps + 1
+            else
+                break
+            end
+        end
+        if cut > 0 then
+            local b = string.byte(clean, cut)
+            if b and b >= 192 then
+                local seq_len = 2
+                if b >= 240 then
+                    seq_len = 4
+                elseif b >= 224 then
+                    seq_len = 3
+                end
+                if cut + seq_len - 1 <= max_cut then
+                    cut = cut + seq_len - 1
+                else
+                    cut = cut - 1
+                end
+            end
+        end
+        clean = clean:sub(1, cut) .. "... [truncated]"
+    end
+    return clean
+end
+
 local function extract_urls(clean_line)
     local urls = {}
     for url in clean_line:gmatch("[Nn]ow listening on:%s*(https?://[^%s%c]+)") do
@@ -105,13 +182,30 @@ end
 
 local function process_stream_data(session, chunk, is_stderr)
     local rem_key = is_stderr and "stderr_rem" or "stdout_rem"
-    local raw = (session[rem_key] or "") .. chunk
+    local raw = ((session[rem_key] or "") .. chunk):gsub("\r\n", "\n")
     local lines = vim.split(raw, "\n", { plain = true })
-    session[rem_key] = table.remove(lines) or ""
+    local rem = table.remove(lines) or ""
+
+    if #rem > MAX_REMAINDER_BYTES then
+        if rem:find("\r") then
+            local stripped_rem = rem:gsub("\r+$", "")
+            local collapsed = stripped_rem:match(".*\r([^\r]+)$")
+            if collapsed and collapsed ~= "" then
+                rem = collapsed
+            else
+                rem = stripped_rem:gsub("\r", "")
+            end
+        end
+        if #rem > MAX_REMAINDER_BYTES then
+            lines[#lines + 1] = rem
+            rem = ""
+        end
+    end
+    session[rem_key] = rem
 
     local url_detected = false
-    for _, line in ipairs(lines) do
-        local clean = strip_ansi(line)
+    for _, raw_line in ipairs(lines) do
+        local clean = sanitize_line(raw_line)
         local urls = extract_urls(clean)
         for _, u in ipairs(urls) do
             local exists = false
@@ -132,7 +226,9 @@ local function process_stream_data(session, chunk, is_stderr)
     if url_detected then
         dispatch_event("url_detected", session)
     end
-    dispatch_event("output", session)
+    if #lines > 0 then
+        dispatch_event("output", session)
+    end
 end
 
 function M.get_session(id)
@@ -268,13 +364,14 @@ function M.start(run_cfg, opts)
         session.exit_code = obj.code
         session.exit_signal = obj.signal
         session.ended_at = os.time()
+        session.handle = nil
 
         if session.stdout_rem ~= "" then
-            session.ring_buffer:push(strip_ansi(session.stdout_rem))
+            session.ring_buffer:push(sanitize_line(session.stdout_rem))
             session.stdout_rem = ""
         end
         if session.stderr_rem ~= "" then
-            session.ring_buffer:push(strip_ansi(session.stderr_rem))
+            session.ring_buffer:push(sanitize_line(session.stderr_rem))
             session.stderr_rem = ""
         end
 
@@ -282,6 +379,10 @@ function M.start(run_cfg, opts)
             session.status = "stopped"
         else
             session.status = "failed"
+        end
+
+        if session.user_stopped and session.pid and vim.fn.has("win32") == 0 then
+            pcall(uv.kill, -session.pid, 9)
         end
 
         dispatch_event("exited", session)
@@ -295,7 +396,6 @@ function M.start(run_cfg, opts)
         end
     end
 
-    -- Setsid via detach=true makes process group ID equal to child PID for reliable tree termination
     local ok_spawn, handle = pcall(vim.system, cmd, {
         cwd = cwd,
         env = env,

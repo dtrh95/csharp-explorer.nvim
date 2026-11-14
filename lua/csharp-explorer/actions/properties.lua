@@ -449,6 +449,7 @@ function M.show_node(node, state)
     local col = math.max(1, math.floor((vim.o.columns - width) / 2))
 
     local buf = vim.api.nvim_create_buf(false, true)
+    vim.bo[buf].undolevels = -1
     vim.bo[buf].buftype = "nofile"
     vim.bo[buf].bufhidden = "wipe"
     vim.bo[buf].swapfile = false

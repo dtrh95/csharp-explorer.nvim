@@ -8,6 +8,10 @@ local M = {
     active_session_id = nil,
     follow_tail = true,
     ns_id = vim.api.nvim_create_namespace("CSharpExplorerRunWindow"),
+    _rendered_session = nil,
+    _rendered_gen = 0,
+    _last_rendered_seq = 0,
+    _has_placeholder = false,
 }
 
 local function get_status_badge(status)
@@ -120,6 +124,7 @@ local function show_help_popup()
     local col = math.floor((total_w - width) / 2)
 
     local hbuf = vim.api.nvim_create_buf(false, true)
+    vim.bo[hbuf].undolevels = -1
     vim.api.nvim_buf_set_lines(hbuf, 0, -1, false, help_lines)
     vim.bo[hbuf].modifiable = false
     vim.bo[hbuf].buftype = "nofile"
@@ -249,6 +254,7 @@ function M.ensure_buffer()
     if not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then
         M.follow_tail = not (config.current.run and config.current.run.auto_scroll == false)
         M.buf = vim.api.nvim_create_buf(false, true)
+        vim.bo[M.buf].undolevels = -1
         vim.bo[M.buf].buftype = "nofile"
         vim.bo[M.buf].bufhidden = "hide"
         vim.bo[M.buf].swapfile = false
@@ -313,41 +319,11 @@ function M.toggle(state)
     end
 end
 
-function M.render()
-    if not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then
-        return
-    end
-
-    vim.api.nvim_buf_clear_namespace(M.buf, M.ns_id, 0, -1)
-    local sessions = process.get_sessions()
-
-    if #sessions == 0 then
-        local lines = {
-            " [No Active Processes]",
-            " Status: idle  │  [u]run project [U]select profile [gc]compounds [q]hide",
-            string.rep("─", 80),
-            " No active or recent process sessions.",
-            " Press 'u' on a project node in CSharpExplorer or run :CSharpExplorerRun to start a service.",
-        }
-        vim.bo[M.buf].modifiable = true
-        vim.api.nvim_buf_set_lines(M.buf, 0, -1, false, lines)
-        vim.bo[M.buf].modifiable = false
-        return
-    end
-
-    if not M.active_session_id or not process.get_session(M.active_session_id) then
-        M.active_session_id = sessions[1].id
-    end
-
-    local win_width = 80
-    if M.win and vim.api.nvim_win_is_valid(M.win) then
-        win_width = vim.api.nvim_win_get_width(M.win)
-    end
-
+local function build_header_lines(sessions, active, win_width)
     local tab_spans = {}
     local tab_str = ""
     for i, s in ipairs(sessions) do
-        local is_active = s.id == M.active_session_id
+        local is_active = s.id == active.id
         local sym, sym_hl = get_status_badge(s.status)
         local short_url = ""
         if s.detected_urls and #s.detected_urls > 0 then
@@ -376,9 +352,8 @@ function M.render()
         }
     end
 
-    local active = process.get_session(M.active_session_id)
     local status_txt = active.status
-    if active.pid then
+    if (active.status == "running" or active.status == "stopping") and active.pid then
         status_txt = status_txt .. " (PID " .. active.pid .. ")"
     end
 
@@ -397,10 +372,65 @@ function M.render()
 
     local sep = string.rep("─", math.max(win_width, #bar, #tab_str))
 
-    local log_lines = active.ring_buffer:get_lines()
-    if #log_lines == 0 then
-        log_lines = { " Process started. Waiting for console output..." }
+    return tab_str, bar, sep, tab_spans
+end
+
+local function apply_tab_extmarks(buf, ns_id, tab_spans)
+    vim.api.nvim_buf_clear_namespace(buf, ns_id, 0, 1)
+    for _, span in ipairs(tab_spans) do
+        local hl = span.is_active and "Title" or "Comment"
+        vim.api.nvim_buf_set_extmark(buf, ns_id, 0, span.start_col, {
+            end_col = span.end_col,
+            hl_group = hl,
+        })
+        vim.api.nvim_buf_set_extmark(buf, ns_id, 0, span.sym_col, {
+            end_col = span.sym_col + span.sym_len,
+            hl_group = span.sym_hl,
+        })
     end
+end
+
+function M.render()
+    if not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then
+        return
+    end
+
+    vim.api.nvim_buf_clear_namespace(M.buf, M.ns_id, 0, -1)
+    local sessions = process.get_sessions()
+
+    if #sessions == 0 then
+        M._rendered_session = nil
+        M._rendered_gen = 0
+        M._last_rendered_seq = 0
+        M._has_placeholder = false
+        local lines = {
+            " [No Active Processes]",
+            " Status: idle  │  [u]run project [U]select profile [gc]compounds [q]hide",
+            string.rep("─", 80),
+            " No active or recent process sessions.",
+            " Press 'u' on a project node in CSharpExplorer or run :CSharpExplorerRun to start a service.",
+        }
+        vim.bo[M.buf].modifiable = true
+        vim.api.nvim_buf_set_lines(M.buf, 0, -1, false, lines)
+        vim.bo[M.buf].modifiable = false
+        return
+    end
+
+    if not M.active_session_id or not process.get_session(M.active_session_id) then
+        M.active_session_id = sessions[1].id
+    end
+
+    local win_width = 80
+    if M.win and vim.api.nvim_win_is_valid(M.win) then
+        win_width = vim.api.nvim_win_get_width(M.win)
+    end
+
+    local active = process.get_session(M.active_session_id)
+    local tab_str, bar, sep, tab_spans = build_header_lines(sessions, active, win_width)
+
+    local log_lines_raw = active.ring_buffer:get_lines()
+    local has_placeholder = #log_lines_raw == 0
+    local log_lines = has_placeholder and { " Process started. Waiting for console output..." } or log_lines_raw
 
     local all_lines = { tab_str, bar, sep }
     for _, l in ipairs(log_lines) do
@@ -411,17 +441,12 @@ function M.render()
     vim.api.nvim_buf_set_lines(M.buf, 0, -1, false, all_lines)
     vim.bo[M.buf].modifiable = false
 
-    for _, span in ipairs(tab_spans) do
-        local hl = span.is_active and "Title" or "Comment"
-        vim.api.nvim_buf_set_extmark(M.buf, M.ns_id, 0, span.start_col, {
-            end_col = span.end_col,
-            hl_group = hl,
-        })
-        vim.api.nvim_buf_set_extmark(M.buf, M.ns_id, 0, span.sym_col, {
-            end_col = span.sym_col + span.sym_len,
-            hl_group = span.sym_hl,
-        })
-    end
+    apply_tab_extmarks(M.buf, M.ns_id, tab_spans)
+
+    M._rendered_session = active
+    M._rendered_gen = active.ring_buffer._gen
+    M._last_rendered_seq = active.ring_buffer._total_seq
+    M._has_placeholder = has_placeholder
 
     if M.follow_tail and M.win and vim.api.nvim_win_is_valid(M.win) then
         local in_visual = vim.api.nvim_get_current_win() == M.win and vim.fn.mode():match("^[vV\22]") ~= nil
@@ -431,13 +456,100 @@ function M.render()
     end
 end
 
-process.subscribe(function(event_type, session)
-    if M.win and vim.api.nvim_win_is_valid(M.win) then
-        if event_type == "started" and not M.active_session_id then
-            M.active_session_id = session.id
-        end
-        M.render()
+function M.append_active_output(session)
+    if not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then
+        return
     end
+    if not session or session.id ~= M.active_session_id then
+        return
+    end
+    if M._rendered_session ~= session or M._rendered_gen ~= session.ring_buffer._gen then
+        M.render()
+        return
+    end
+
+    local new_lines, new_seq, replaced_all = session.ring_buffer:get_lines_since(M._last_rendered_seq)
+    if #new_lines == 0 then
+        return
+    end
+
+    vim.bo[M.buf].modifiable = true
+    if replaced_all or M._has_placeholder then
+        vim.api.nvim_buf_set_lines(M.buf, 3, -1, false, new_lines)
+        M._has_placeholder = false
+    else
+        vim.api.nvim_buf_set_lines(M.buf, -1, -1, false, new_lines)
+        local overflow = vim.api.nvim_buf_line_count(M.buf) - (3 + session.ring_buffer._max)
+        if overflow > 0 then
+            vim.api.nvim_buf_set_lines(M.buf, 3, 3 + overflow, false, {})
+        end
+    end
+    vim.bo[M.buf].modifiable = false
+    M._last_rendered_seq = new_seq
+
+    if M.follow_tail and M.win and vim.api.nvim_win_is_valid(M.win) then
+        local in_visual = vim.api.nvim_get_current_win() == M.win and vim.fn.mode():match("^[vV\22]") ~= nil
+        if not in_visual then
+            local count = vim.api.nvim_buf_line_count(M.buf)
+            pcall(vim.api.nvim_win_set_cursor, M.win, { count, 0 })
+        end
+    end
+end
+
+function M.render_header()
+    if not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then
+        return
+    end
+
+    local sessions = process.get_sessions()
+    if #sessions == 0 or not M.active_session_id then
+        M.render()
+        return
+    end
+
+    local active = process.get_session(M.active_session_id)
+    if not active or M._rendered_session ~= active or M._rendered_gen ~= active.ring_buffer._gen then
+        M.render()
+        return
+    end
+
+    if vim.api.nvim_buf_line_count(M.buf) < 4 then
+        M.render()
+        return
+    end
+
+    local win_width = 80
+    if M.win and vim.api.nvim_win_is_valid(M.win) then
+        win_width = vim.api.nvim_win_get_width(M.win)
+    end
+
+    local tab_str, bar, sep, tab_spans = build_header_lines(sessions, active, win_width)
+
+    vim.bo[M.buf].modifiable = true
+    vim.api.nvim_buf_set_lines(M.buf, 0, 3, false, { tab_str, bar, sep })
+    vim.bo[M.buf].modifiable = false
+
+    apply_tab_extmarks(M.buf, M.ns_id, tab_spans)
+
+    M.append_active_output(active)
+end
+
+process.subscribe(function(event_type, session)
+    if not M.win or not vim.api.nvim_win_is_valid(M.win) then
+        return
+    end
+
+    if event_type == "output" then
+        if session and session.id == M.active_session_id then
+            M.append_active_output(session)
+        end
+        return
+    end
+
+    if event_type == "started" and not M.active_session_id and session then
+        M.active_session_id = session.id
+    end
+    M.render_header()
 end)
 
 return M

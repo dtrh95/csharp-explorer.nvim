@@ -161,56 +161,97 @@ function M.render_process_badges(state)
 
     vim.api.nvim_buf_clear_namespace(state.buf, M.process_ns_id, 0, -1)
 
+    local ok_dbg, debug_engine = pcall(require, "csharp-explorer.debug")
     local ok_proc, process = pcall(require, "csharp-explorer.process")
-    if not ok_proc then
-        return
-    end
 
     for line_num, node in pairs(M.line_to_node) do
-        if node._type == "project" and node._path then
-            local sessions = process.get_project_sessions(node._path)
-            if #sessions > 0 then
-                local best_session = nil
-                for _, s in ipairs(sessions) do
+        local node_path = node._path or node.path
+        if node._type == "project" and node_path then
+            local text, hl = nil, nil
+
+            local active_dbg, failed_dbg = nil, nil
+            if ok_dbg and debug_engine and debug_engine.get_project_sessions then
+                local dbg_sessions = debug_engine.get_project_sessions(node_path)
+                for _, s in ipairs(dbg_sessions) do
+                    if s.status == "paused" then
+                        active_dbg = s
+                        break
+                    elseif s.status == "running" then
+                        if not active_dbg or active_dbg.status ~= "paused" then
+                            active_dbg = s
+                        end
+                    elseif s.status == "building" or s.status == "starting" or s.status == "queued" then
+                        if not active_dbg or (active_dbg.status ~= "paused" and active_dbg.status ~= "running") then
+                            active_dbg = s
+                        end
+                    elseif s.status == "failed" and not failed_dbg then
+                        failed_dbg = s
+                    end
+                end
+            end
+
+            local active_proc, failed_proc = nil, nil
+            if ok_proc and process and process.get_project_sessions then
+                local proc_sessions = process.get_project_sessions(node_path)
+                for _, s in ipairs(proc_sessions) do
                     if s.status == "running" then
-                        best_session = s
+                        active_proc = s
                         break
                     elseif s.status == "starting" or s.status == "stopping" then
-                        best_session = s
-                    elseif not best_session then
-                        best_session = s
-                    end
-                end
-
-                if best_session and best_session.status ~= "stopped" then
-                    local text = ""
-                    local hl = "Comment"
-                    if best_session.status == "running" then
-                        hl = "DiagnosticOk"
-                        local port = nil
-                        if best_session.detected_urls and #best_session.detected_urls > 0 then
-                            port = best_session.detected_urls[1]:match(":(%d+)")
+                        if not active_proc then
+                            active_proc = s
                         end
-                        text = port and string.format("● :%s ", port) or "● running "
-                    elseif best_session.status == "starting" then
-                        hl = "DiagnosticWarn"
-                        text = "◐ starting "
-                    elseif best_session.status == "stopping" then
-                        hl = "DiagnosticWarn"
-                        text = "◌ stopping "
-                    elseif best_session.status == "failed" then
-                        hl = "DiagnosticError"
-                        text = string.format("▲ exit %s ", tostring(best_session.exit_code or 1))
-                    end
-
-                    if text ~= "" then
-                        pcall(vim.api.nvim_buf_set_extmark, state.buf, M.process_ns_id, line_num - 1, 0, {
-                            virt_text = { { text, hl } },
-                            virt_text_pos = "right_align",
-                            priority = 160,
-                        })
+                    elseif s.status == "failed" and not failed_proc then
+                        failed_proc = s
                     end
                 end
+            end
+
+            if active_dbg then
+                if active_dbg.status == "paused" then
+                    hl = "DiagnosticWarn"
+                    local l = (active_dbg.current_frame and active_dbg.current_frame.line) or "?"
+                    text = " ⏸ L" .. tostring(l)
+                elseif active_dbg.status == "running" then
+                    hl = "Special"
+                    local port = nil
+                    if active_dbg.detected_urls and #active_dbg.detected_urls > 0 then
+                        port = active_dbg.detected_urls[1]:match(":(%d+)")
+                    end
+                    text = port and string.format(" ● debug :%s", port) or " ● debug"
+                else
+                    hl = "DiagnosticWarn"
+                    text = " ◐ building"
+                end
+            elseif active_proc then
+                if active_proc.status == "running" then
+                    hl = "DiagnosticOk"
+                    local port = nil
+                    if active_proc.detected_urls and #active_proc.detected_urls > 0 then
+                        port = active_proc.detected_urls[1]:match(":(%d+)")
+                    end
+                    text = port and string.format("● :%s ", port) or "● running "
+                elseif active_proc.status == "starting" then
+                    hl = "DiagnosticWarn"
+                    text = "◐ starting "
+                elseif active_proc.status == "stopping" then
+                    hl = "DiagnosticWarn"
+                    text = "◌ stopping "
+                end
+            elseif failed_dbg then
+                hl = "DiagnosticError"
+                text = " ✗ debug failed"
+            elseif failed_proc then
+                hl = "DiagnosticError"
+                text = string.format("▲ exit %s ", tostring(failed_proc.exit_code or 1))
+            end
+
+            if text and hl then
+                pcall(vim.api.nvim_buf_set_extmark, state.buf, M.process_ns_id, line_num - 1, 0, {
+                    virt_text = { { text, hl } },
+                    virt_text_pos = "right_align",
+                    priority = 160,
+                })
             end
         end
     end

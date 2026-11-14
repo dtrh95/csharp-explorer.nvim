@@ -107,6 +107,7 @@ local function show_help_popup()
         "  S              Stop all processes",
         "  c              Clear active console log",
         "  f              Toggle follow-tail scroll",
+        "  d              Attach debugger to active process",
         "  <CR> / gx      Open URL in browser",
         "  x              Remove stopped/failed session",
         "  ?              Show this help",
@@ -193,6 +194,15 @@ local function setup_keymaps(buf)
                 select_tab(sessions[idx].id)
             end
         end)
+    end, opts)
+
+    vim.keymap.set("n", "d", function()
+        if M.active_session_id then
+            local ok_dbg, dbg = pcall(require, "csharp-explorer.debug")
+            if ok_dbg and dbg and dbg.attach_run_session then
+                dbg.attach_run_session(M.active_session_id)
+            end
+        end
     end, opts)
 
     vim.keymap.set("n", "r", function()
@@ -371,7 +381,7 @@ local function build_header_lines(sessions, active, win_width)
 
     local follow_txt = "Follow: " .. (M.follow_tail and "ON" or "OFF")
     local bar = string.format(
-        " Status: %s  %s%s  │  [r]estart [s]top [S]top-all [c]lear [f]ollow [p]ick [gx/<CR>]url [?]help [q]hide",
+        " Status: %s  %s%s  │  [d]ebug attach  [r]estart [s]top [S]top-all [c]lear [f]ollow [p]ick [gx/<CR>]url [?]help [q]hide",
         status_txt,
         url_txt,
         follow_txt

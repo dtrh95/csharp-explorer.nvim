@@ -76,6 +76,13 @@ M.defaults = {
     filter = {
         gitignored = true,
     },
+    refactor = {
+        lsp_rename = true,
+        confirm_delete = true,
+        sync_namespace_on_move = true,
+        inject_usings_on_move = true,
+        save_modified_buffers = true,
+    },
     ui = {
         width = 30,
         sync_nvim_tree_width = true,

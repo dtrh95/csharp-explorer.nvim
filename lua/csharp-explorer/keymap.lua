@@ -1,7 +1,6 @@
 local config = require("csharp-explorer.config")
 local navigation = require("csharp-explorer.actions.navigation")
 local properties = require("csharp-explorer.actions.properties")
-local fs_actions = require("csharp-explorer.actions.fs")
 local clipboard = require("csharp-explorer.actions.clipboard")
 local renderer = require("csharp-explorer.renderer")
 
@@ -53,9 +52,15 @@ function M.apply(state)
         bind_keys(km.item_properties, properties.open(state), opts)
     end
 
-    bind_keys(km.create, fs_actions.proxy_fs(state, "create"), opts)
-    bind_keys(km.delete, fs_actions.proxy_fs(state, "remove"), opts)
-    bind_keys(km.rename, fs_actions.proxy_fs(state, "rename"), opts)
+    bind_keys(km.create, function()
+        require("csharp-explorer.actions.refactor").create(state)
+    end, opts)
+    bind_keys(km.delete, function()
+        require("csharp-explorer.actions.refactor").delete(state)
+    end, opts)
+    bind_keys(km.rename, function()
+        require("csharp-explorer.actions.refactor").rename(state)
+    end, opts)
 
     bind_keys(km.copy, function()
         local node = navigation.get_node(state)
@@ -80,10 +85,7 @@ function M.apply(state)
         if not node then
             return
         end
-        clipboard.paste(node)
-        local node_utils = require("csharp-explorer.node")
-        node_utils.reset_projects(state.tree)
-        renderer.render(state)
+        clipboard.paste(node, state)
     end, opts)
 
     bind_keys(km.toggle_gitignore, state.toggle_gitignore, opts)

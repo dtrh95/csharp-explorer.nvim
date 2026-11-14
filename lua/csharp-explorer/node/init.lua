@@ -526,4 +526,86 @@ function M.reset_projects(node)
     end
 end
 
+function M.get_solution_project_dirs(root)
+    local dirs = {}
+    if not root then
+        return dirs
+    end
+    local visited = {}
+    local function walk(node)
+        if node._type == "project" and node._dir then
+            local norm = metadata.normalize_path(node._dir)
+            if not visited[norm] then
+                visited[norm] = true
+                dirs[#dirs + 1] = norm
+            end
+        end
+        if node._children then
+            for _, child in pairs(node._children) do
+                walk(child)
+            end
+        end
+    end
+    walk(root)
+    table.sort(dirs)
+    return dirs
+end
+
+function M.rekey_relative_map(map, old_rel, new_rel)
+    local out = {}
+    if not map then
+        return out
+    end
+    for k, v in pairs(map) do
+        if k == old_rel then
+            out[new_rel] = v
+        elseif vim.startswith(k, old_rel .. "/") then
+            out[new_rel .. k:sub(#old_rel + 1)] = v
+        else
+            out[k] = v
+        end
+    end
+    return out
+end
+
+function M.rekey_expansion_snapshot(snapshot, opts)
+    if not snapshot then
+        return { nodes = {}, projects = {} }
+    end
+    opts = opts or {}
+    local nodes = snapshot.nodes or {}
+    if opts.old_node_prefix and opts.new_node_prefix then
+        nodes = M.rekey_relative_map(nodes, opts.old_node_prefix, opts.new_node_prefix)
+    end
+
+    local projects = {}
+    local old_p = opts.old_proj_csproj and metadata.normalize_path(opts.old_proj_csproj):lower() or nil
+    local new_p = opts.new_proj_csproj and metadata.normalize_path(opts.new_proj_csproj):lower() or nil
+    local target_p = opts.project_csproj and metadata.normalize_path(opts.project_csproj):lower() or nil
+
+    for k, p_state in pairs(snapshot.projects or {}) do
+        local out_key = k
+        if old_p and new_p then
+            if k == old_p then
+                out_key = new_p
+            elseif vim.startswith(k, old_p .. "/") then
+                out_key = new_p .. k:sub(#old_p + 1)
+            end
+        end
+        local children = p_state.children or {}
+        if opts.old_rel and opts.new_rel and (not target_p or k == target_p or out_key == target_p) then
+            children = M.rekey_relative_map(children, opts.old_rel, opts.new_rel)
+        end
+        projects[out_key] = {
+            expanded = p_state.expanded,
+            children = children,
+        }
+    end
+
+    return {
+        nodes = nodes,
+        projects = projects,
+    }
+end
+
 return M

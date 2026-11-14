@@ -133,4 +133,27 @@ function M.partition_directory_files(file_names, rules)
     }
 end
 
+function M.resolve_companions(parent_name, sibling_names, rules)
+    local partitioned = M.partition_directory_files(sibling_names, rules)
+    return partitioned.children_by_parent[parent_name] or {}
+end
+
+function M.rename_companion_name(old_parent_name, new_parent_name, child_name)
+    if old_parent_name == new_parent_name then
+        return child_name
+    end
+    if old_parent_name == "appsettings.json" or old_parent_name == "Dockerfile" then
+        return child_name
+    end
+    if vim.startswith(child_name, old_parent_name .. ".") then
+        return new_parent_name .. child_name:sub(#old_parent_name + 1)
+    end
+    local old_stem = old_parent_name:match("^(.+)%.[^.]+$") or old_parent_name
+    local new_stem = new_parent_name:match("^(.+)%.[^.]+$") or new_parent_name
+    if old_stem ~= "" and vim.startswith(child_name, old_stem .. ".") then
+        return new_stem .. child_name:sub(#old_stem + 1)
+    end
+    return child_name
+end
+
 return M

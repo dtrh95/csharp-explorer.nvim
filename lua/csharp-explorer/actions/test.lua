@@ -585,4 +585,89 @@ function M.select_test(state, opts)
     end)
 end
 
+function M.debug_test(state, opts)
+    local debug_engine = require("csharp-explorer.debug")
+    local target = runner.resolve_target(state, opts)
+    local path = (target and target.project_paths and target.project_paths[1])
+        or (target and target.path)
+        or vim.api.nvim_buf_get_name(0)
+    local label = target and ("Test: " .. target.name) or nil
+    return debug_engine.debug_test(state, path, nil, label, opts)
+end
+
+function M.debug_nearest(state, opts)
+    local debug_engine = require("csharp-explorer.debug")
+    local target = runner.resolve_target(state, opts)
+    if target and target.kind == "file" and target.path and target.path:match("%.cs$") then
+        local disc = M.discover_file_tests(target.path)
+        local enclosed = M.find_enclosing_test(disc, target.cursor_line or 1)
+        local csproj = (target.project_paths and target.project_paths[1]) or target.path
+        if enclosed and enclosed.kind == "method" then
+            local filter = "FullyQualifiedName=" .. enclosed.test.full_name
+            local label = string.format("[%s] %s", enclosed.test.attribute, enclosed.test.name)
+            return debug_engine.debug_test(state, csproj, filter, label, opts)
+        elseif enclosed and enclosed.kind == "class" then
+            local cls_fqn = (enclosed.class.namespace and (enclosed.class.namespace .. ".") or "")
+                .. enclosed.class.name
+            local filter = "FullyQualifiedName~" .. cls_fqn
+            local label = "Tests in " .. enclosed.class.name
+            return debug_engine.debug_test(state, csproj, filter, label, opts)
+        end
+    end
+    return M.debug_test(state, opts)
+end
+
+function M.select_and_debug(state, opts)
+    local target = runner.resolve_target(state, opts)
+    if not target or not target.path or not target.path:match("%.cs$") then
+        vim.notify("Select and debug requires a .cs file target", vim.log.levels.WARN)
+        return nil
+    end
+    local disc = M.discover_file_tests(target.path)
+    local all_tests = {}
+    if disc and disc.classes then
+        for _, cls in ipairs(disc.classes) do
+            for _, t in ipairs(cls.tests) do
+                table.insert(all_tests, t)
+            end
+        end
+    end
+    if #all_tests == 0 then
+        vim.notify("No tests discovered in " .. target.name, vim.log.levels.WARN)
+        return nil
+    end
+
+    local items = {}
+    for _, cls in ipairs(disc.classes) do
+        if #cls.tests > 0 then
+            local cls_fqn = (cls.namespace and (cls.namespace .. ".") or "") .. cls.name
+            table.insert(items, {
+                kind = "class",
+                label = string.format("All tests in %s (%d)", cls.name, #cls.tests),
+                filter = "FullyQualifiedName~" .. cls_fqn,
+            })
+        end
+    end
+    for _, t in ipairs(all_tests) do
+        table.insert(items, {
+            kind = "method",
+            label = string.format("[%s] %s", t.attribute, t.name),
+            filter = "FullyQualifiedName=" .. t.full_name,
+        })
+    end
+
+    local debug_engine = require("csharp-explorer.debug")
+    local csproj = (target.project_paths and target.project_paths[1]) or target.path
+    vim.ui.select(items, {
+        prompt = "Select Test to Debug:",
+        format_item = function(item)
+            return item.label
+        end,
+    }, function(choice)
+        if choice then
+            debug_engine.debug_test(state, csproj, choice.filter, choice.label, opts)
+        end
+    end)
+end
+
 return M

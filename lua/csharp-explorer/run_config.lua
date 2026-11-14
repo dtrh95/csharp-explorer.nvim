@@ -217,6 +217,8 @@ local function parse_args(raw_args)
     return args
 end
 
+M.parse_args = parse_args
+
 local function parse_urls(raw_urls)
     local urls = {}
     if type(raw_urls) == "string" then
@@ -426,6 +428,8 @@ local function apply_launch_profile_env(run_cfg)
     return env
 end
 
+M.apply_launch_profile_env = apply_launch_profile_env
+
 function M.build_command_and_env(run_cfg, opts)
     opts = opts or {}
     local dotnet_bin = (config.current.orchestration and config.current.orchestration.dotnet_cmd)
@@ -485,7 +489,7 @@ local function select_build_tfm(prof)
     return prof.target_frameworks[1]
 end
 
-function M.build_prepare_command(run_cfg, result_file)
+function M.build_prepare_command(run_cfg, result_file, opts)
     local dotnet_bin = (config.current.orchestration and config.current.orchestration.dotnet_cmd)
         or require("csharp-explorer.runner").resolve_dotnet()
     local prof = metadata.get_project_profile(run_cfg.project_path)
@@ -494,6 +498,10 @@ function M.build_prepare_command(run_cfg, result_file)
     if selected_tfm then
         cmd[#cmd + 1] = "-f"
         cmd[#cmd + 1] = selected_tfm
+    end
+    if opts and type(opts.configuration) == "string" and opts.configuration ~= "" then
+        cmd[#cmd + 1] = "-c"
+        cmd[#cmd + 1] = opts.configuration
     end
     cmd[#cmd + 1] = "-nologo"
     cmd[#cmd + 1] = "-nr:false"
@@ -513,6 +521,72 @@ function M.build_prepare_command(run_cfg, result_file)
     env["DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER"] = "1"
 
     return cmd, env, run_cfg.cwd
+end
+
+function M.build_debug_launch_spec(run_cfg, props, overrides)
+    local program = nil
+    if run_cfg.command_type == "Executable" and run_cfg.executable_path then
+        program = run_cfg.executable_path
+    elseif props and type(props.target_path) == "string" and props.target_path ~= "" then
+        program = props.target_path
+    end
+
+    local args = {}
+    if props and props.start_arguments and props.start_arguments ~= "" then
+        local sargs = parse_args(props.start_arguments)
+        for _, a in ipairs(sargs) do
+            args[#args + 1] = a
+        end
+    end
+    if run_cfg.args then
+        for _, a in ipairs(run_cfg.args) do
+            args[#args + 1] = a
+        end
+    end
+    if overrides and overrides.args then
+        for _, a in ipairs(overrides.args) do
+            args[#args + 1] = a
+        end
+    end
+
+    local env = apply_launch_profile_env(run_cfg)
+    if overrides and overrides.env then
+        for k, v in pairs(overrides.env) do
+            env[k] = tostring(v)
+        end
+    end
+
+    local stop_at_entry = false
+    if overrides and overrides.stop_at_entry ~= nil then
+        stop_at_entry = overrides.stop_at_entry
+    elseif config.current.debug and config.current.debug.stop_at_entry ~= nil then
+        stop_at_entry = config.current.debug.stop_at_entry
+    end
+
+    local just_my_code = true
+    if overrides and overrides.just_my_code ~= nil then
+        just_my_code = overrides.just_my_code
+    elseif config.current.debug and config.current.debug.just_my_code ~= nil then
+        just_my_code = config.current.debug.just_my_code
+    end
+
+    local cwd = (overrides and overrides.cwd) or run_cfg.cwd
+    local name = (overrides and overrides.name) or run_cfg.name or run_cfg.project_name
+    local session_id = overrides and overrides.session_id or nil
+
+    return {
+        type = "csharp-explorer-coreclr",
+        request = "launch",
+        name = name,
+        program = program,
+        args = args,
+        cwd = cwd,
+        env = env,
+        stopAtEntry = stop_at_entry,
+        justMyCode = just_my_code,
+        console = "internalConsole",
+        _csharp_explorer_session_id = session_id,
+    }
 end
 
 function M.read_build_properties(result_file)

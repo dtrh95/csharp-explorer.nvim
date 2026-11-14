@@ -87,6 +87,47 @@ function M.apply(state)
     end, opts)
 
     bind_keys(km.toggle_gitignore, state.toggle_gitignore, opts)
+
+    if km.build then
+        bind_keys(km.build, function()
+            require("csharp-explorer.actions.build").execute(state, "build")
+        end, opts)
+    end
+    if km.restore then
+        bind_keys(km.restore, function()
+            require("csharp-explorer.actions.build").execute(state, "restore")
+        end, opts)
+    end
+    if km.clean then
+        bind_keys(km.clean, function()
+            require("csharp-explorer.actions.build").execute(state, "clean")
+        end, opts)
+    end
+    if km.test then
+        bind_keys(km.test, function()
+            require("csharp-explorer.actions.test").run_target(state)
+        end, opts)
+    end
+    if km.add then
+        bind_keys(km.add, function()
+            require("csharp-explorer.actions.templates").add(state)
+        end, opts)
+    end
+    if km.action_menu then
+        bind_keys(km.action_menu, function()
+            require("csharp-explorer.actions.templates").action_menu(state)
+        end, opts)
+    end
+    if km.task_output then
+        bind_keys(km.task_output, function()
+            require("csharp-explorer.runner").toggle_output()
+        end, opts)
+    end
+    if km.cancel_task then
+        bind_keys(km.cancel_task, function()
+            require("csharp-explorer.runner").cancel()
+        end, opts)
+    end
 end
 
 return M

@@ -1,6 +1,6 @@
 local config = require("csharp-explorer.config")
-local navigation = require("csharp-explorer.actions.navigation")
 local process = require("csharp-explorer.process")
+local chrome = require("csharp-explorer.ui.chrome")
 
 local M = {
     buf = nil,
@@ -14,17 +14,54 @@ local M = {
     _has_placeholder = false,
 }
 
+local KEYMAP_SECTIONS = {
+    {
+        title = "Tabs & Sessions",
+        items = {
+            { key = "] / <Tab>", desc = "Next process tab" },
+            { key = "[ / <S-Tab>", desc = "Previous process tab" },
+            { key = "g1-g9", desc = "Select tab 1-9" },
+            { key = "p", desc = "Pick tab from list" },
+            { key = "x", desc = "Dismiss stopped session" },
+        },
+    },
+    {
+        title = "Process Control",
+        items = {
+            { key = "r", desc = "Restart active process" },
+            { key = "s", desc = "Stop active process" },
+            { key = "S", desc = "Stop all processes" },
+            { key = "d", desc = "Attach debugger to active process" },
+        },
+    },
+    {
+        title = "Console Output",
+        items = {
+            { key = "c", desc = "Clear active console log" },
+            { key = "f", desc = "Toggle follow-tail scroll" },
+            { key = "<CR> / o / gx", desc = "Open URL in browser" },
+        },
+    },
+    {
+        title = "General",
+        items = {
+            { key = "?", desc = "Show keyboard shortcuts" },
+            { key = "q", desc = "Hide run window" },
+        },
+    },
+}
+
 local function get_status_badge(status)
     if status == "running" then
-        return "●", "DiagnosticOk"
+        return "●", "CSharpExplorerBadgeOk"
     elseif status == "starting" then
-        return "◐", "DiagnosticWarn"
+        return "◐", "CSharpExplorerBadgeWarn"
     elseif status == "stopping" then
-        return "◌", "DiagnosticWarn"
+        return "◌", "CSharpExplorerBadgeMuted"
     elseif status == "failed" then
-        return "▲", "DiagnosticError"
+        return "▲", "CSharpExplorerBadgeError"
     end
-    return "○", "Comment"
+    return "○", "CSharpExplorerBadgeMuted"
 end
 
 local function select_tab(session_id)
@@ -95,59 +132,63 @@ local function open_url_under_cursor_or_active()
 end
 
 local function show_help_popup()
-    local help_lines = {
-        " CSharpExplorer Run Window Keymaps",
-        " ──────────────────────────────────",
-        "  ] / <Tab>      Next process tab",
-        "  [ / <S-Tab>    Previous process tab",
-        "  g1-g9          Select tab 1-9",
-        "  p              Pick tab from list",
-        "  r              Restart active process",
-        "  s              Stop active process",
-        "  S              Stop all processes",
-        "  c              Clear active console log",
-        "  f              Toggle follow-tail scroll",
-        "  d              Attach debugger to active process",
-        "  <CR> / gx      Open URL in browser",
-        "  x              Remove stopped/failed session",
-        "  ?              Show this help",
-        "  q              Hide run window",
-        " ──────────────────────────────────",
-        "  Press q or <Esc> to close",
-    }
+    chrome.show_help_modal("Run Window Shortcuts", KEYMAP_SECTIONS)
+end
 
-    local width = 44
-    local height = #help_lines
-    local uis = vim.api.nvim_list_uis()
-    local total_w = (uis[1] and uis[1].width) or 80
-    local total_h = (uis[1] and uis[1].height) or 24
-    local row = math.floor((total_h - height) / 2)
-    local col = math.floor((total_w - width) / 2)
-
-    local hbuf = vim.api.nvim_create_buf(false, true)
-    vim.bo[hbuf].undolevels = -1
-    vim.api.nvim_buf_set_lines(hbuf, 0, -1, false, help_lines)
-    vim.bo[hbuf].modifiable = false
-    vim.bo[hbuf].buftype = "nofile"
-
-    local hwin = vim.api.nvim_open_win(hbuf, true, {
-        relative = "editor",
-        width = width,
-        height = height,
-        row = row,
-        col = col,
-        style = "minimal",
-        border = "rounded",
-    })
-
-    local function close_help()
-        if vim.api.nvim_win_is_valid(hwin) then
-            vim.api.nvim_win_close(hwin, true)
-        end
+local function update_winbar(sessions, active)
+    if not M.win or not vim.api.nvim_win_is_valid(M.win) then
+        return
     end
 
-    vim.keymap.set("n", "q", close_help, { buffer = hbuf, nowait = true })
-    vim.keymap.set("n", "<Esc>", close_help, { buffer = hbuf, nowait = true })
+    if #sessions == 0 or not active then
+        local left = { { " [No Active Processes]", "CSharpExplorerMuted" } }
+        local right = { { "? Help ", "CSharpExplorerMuted" } }
+        chrome.set_winbar(M.win, left, right)
+        return
+    end
+
+    local left_chunks = {}
+    for i, s in ipairs(sessions) do
+        local is_active = s.id == active.id
+        local sym, _ = get_status_badge(s.status)
+        local short_url = ""
+        if s.detected_urls and #s.detected_urls > 0 then
+            local port = s.detected_urls[1]:match(":(%d+)")
+            if port then
+                short_url = " :" .. port
+            end
+        end
+        local proj_name = (s.config and s.config.project_name) or s.name or s.id
+        local label = string.format(" %d: %s %s%s ", i, sym, proj_name, short_url)
+        local hl = is_active and "CSharpExplorerTabActive" or "CSharpExplorerTabInactive"
+        left_chunks[#left_chunks + 1] = { label, hl }
+    end
+
+    local status_txt = active.status
+    if active.status == "starting" and active.stage == "queued" then
+        status_txt = "starting (queued)"
+    elseif active.status == "starting" and active.stage == "building" then
+        status_txt = "building"
+        if active.build_pid then
+            status_txt = status_txt .. " (PID " .. active.build_pid .. ")"
+        end
+    elseif (active.status == "running" or active.status == "stopping") and active.pid then
+        status_txt = status_txt .. " (PID " .. active.pid .. ")"
+    end
+
+    left_chunks[#left_chunks + 1] = { "  " .. status_txt, "CSharpExplorerNormal" }
+
+    if active.detected_urls and #active.detected_urls > 0 then
+        left_chunks[#left_chunks + 1] = { " " .. active.detected_urls[1], "CSharpExplorerAccent" }
+    end
+
+    local follow_txt = "Follow: " .. (M.follow_tail and "ON" or "OFF")
+    local right_chunks = {
+        { follow_txt .. "  ", "CSharpExplorerMuted" },
+        { "? Help ", "CSharpExplorerMuted" },
+    }
+
+    chrome.set_winbar(M.win, left_chunks, right_chunks)
 end
 
 local function setup_keymaps(buf)
@@ -155,28 +196,31 @@ local function setup_keymaps(buf)
 
     vim.keymap.set("n", "q", function()
         M.close()
-    end, opts)
+    end, vim.tbl_extend("force", opts, { desc = "Hide run window" }))
 
     vim.keymap.set("n", "]", function()
         cycle_tab(1)
-    end, opts)
-    vim.keymap.set("n", "<Tab>", function()
-        cycle_tab(1)
-    end, opts)
+    end, vim.tbl_extend("force", opts, { desc = "Next process tab" }))
+
     vim.keymap.set("n", "[", function()
         cycle_tab(-1)
-    end, opts)
+    end, vim.tbl_extend("force", opts, { desc = "Previous process tab" }))
+
+    vim.keymap.set("n", "<Tab>", function()
+        cycle_tab(1)
+    end, vim.tbl_extend("force", opts, { desc = "Next process tab" }))
+
     vim.keymap.set("n", "<S-Tab>", function()
         cycle_tab(-1)
-    end, opts)
+    end, vim.tbl_extend("force", opts, { desc = "Previous process tab" }))
 
     for i = 1, 9 do
-        vim.keymap.set("n", "g" .. tostring(i), function()
+        vim.keymap.set("n", "g" .. i, function()
             local sessions = process.get_sessions()
             if sessions[i] then
                 select_tab(sessions[i].id)
             end
-        end, opts)
+        end, vim.tbl_extend("force", opts, { desc = "Select tab " .. i }))
     end
 
     vim.keymap.set("n", "p", function()
@@ -185,16 +229,49 @@ local function setup_keymaps(buf)
             return
         end
         local items = {}
-        for _, s in ipairs(sessions) do
-            local sym = get_status_badge(s.status)
-            items[#items + 1] = string.format("%s %s (%s)", sym, s.config.project_name, s.config.profile_name)
+        for i, s in ipairs(sessions) do
+            items[#items + 1] = string.format("%d: %s (%s)", i, s.config.project_name, s.status)
         end
-        vim.ui.select(items, { prompt = "Select Process Session:" }, function(_, idx)
+        vim.ui.select(items, { prompt = "Select Process Session: " }, function(_, idx)
             if idx and sessions[idx] then
                 select_tab(sessions[idx].id)
             end
         end)
-    end, opts)
+    end, vim.tbl_extend("force", opts, { desc = "Pick tab from list" }))
+
+    vim.keymap.set("n", "r", function()
+        if M.active_session_id then
+            process.restart(M.active_session_id)
+        end
+    end, vim.tbl_extend("force", opts, { desc = "Restart active process" }))
+
+    vim.keymap.set("n", "s", function()
+        if M.active_session_id then
+            process.stop(M.active_session_id)
+        end
+    end, vim.tbl_extend("force", opts, { desc = "Stop active process" }))
+
+    vim.keymap.set("n", "S", function()
+        process.stop_all()
+    end, vim.tbl_extend("force", opts, { desc = "Stop all processes" }))
+
+    vim.keymap.set("n", "c", function()
+        if M.active_session_id then
+            process.clear_session_log(M.active_session_id)
+            M.render()
+        end
+    end, vim.tbl_extend("force", opts, { desc = "Clear active console log" }))
+
+    vim.keymap.set("n", "f", function()
+        M.follow_tail = not M.follow_tail
+        local sessions = process.get_sessions()
+        local active = M.active_session_id and process.get_session(M.active_session_id)
+        update_winbar(sessions, active)
+        if M.follow_tail and M.win and vim.api.nvim_win_is_valid(M.win) then
+            local count = vim.api.nvim_buf_line_count(M.buf)
+            pcall(vim.api.nvim_win_set_cursor, M.win, { count, 0 })
+        end
+    end, vim.tbl_extend("force", opts, { desc = "Toggle follow-tail scroll" }))
 
     vim.keymap.set("n", "d", function()
         if M.active_session_id then
@@ -203,39 +280,26 @@ local function setup_keymaps(buf)
                 dbg.attach_run_session(M.active_session_id)
             end
         end
-    end, opts)
+    end, vim.tbl_extend("force", opts, { desc = "Attach debugger to active process" }))
 
-    vim.keymap.set("n", "r", function()
-        if M.active_session_id then
-            process.restart(M.active_session_id)
-        end
-    end, opts)
-
-    vim.keymap.set("n", "s", function()
-        if M.active_session_id then
-            process.stop(M.active_session_id)
-        end
-    end, opts)
-
-    vim.keymap.set("n", "S", function()
-        process.stop_all()
-    end, opts)
-
-    vim.keymap.set("n", "c", function()
-        if M.active_session_id then
-            process.clear_session_log(M.active_session_id)
-            M.render()
-        end
-    end, opts)
-
-    vim.keymap.set("n", "f", function()
-        M.follow_tail = not M.follow_tail
-        vim.notify("Follow tail: " .. (M.follow_tail and "ON" or "OFF"), vim.log.levels.INFO)
-        M.render()
-    end, opts)
-
-    vim.keymap.set("n", "<CR>", open_url_under_cursor_or_active, opts)
-    vim.keymap.set("n", "gx", open_url_under_cursor_or_active, opts)
+    vim.keymap.set(
+        "n",
+        "<CR>",
+        open_url_under_cursor_or_active,
+        vim.tbl_extend("force", opts, { desc = "Open URL in browser" })
+    )
+    vim.keymap.set(
+        "n",
+        "o",
+        open_url_under_cursor_or_active,
+        vim.tbl_extend("force", opts, { desc = "Open URL in browser" })
+    )
+    vim.keymap.set(
+        "n",
+        "gx",
+        open_url_under_cursor_or_active,
+        vim.tbl_extend("force", opts, { desc = "Open URL in browser" })
+    )
 
     vim.keymap.set("n", "x", function()
         if M.active_session_id then
@@ -255,9 +319,9 @@ local function setup_keymaps(buf)
                 vim.notify("Cannot remove an active session. Stop it first.", vim.log.levels.WARN)
             end
         end
-    end, opts)
+    end, vim.tbl_extend("force", opts, { desc = "Dismiss stopped session" }))
 
-    vim.keymap.set("n", "?", show_help_popup, opts)
+    vim.keymap.set("n", "?", show_help_popup, vim.tbl_extend("force", opts, { desc = "Show keyboard shortcuts" }))
 end
 
 function M.ensure_buffer()
@@ -289,27 +353,21 @@ function M.open(state, opts)
         return M.win
     end
 
-    local prev_win = vim.api.nvim_get_current_win()
-    if state then
-        navigation.focus_editor_window(state)
-    end
-
-    local buf = M.ensure_buffer()
+    M.ensure_buffer()
     local height = (config.current.run and config.current.run.window_height) or 12
-    vim.cmd("belowright " .. height .. "split")
-    M.win = vim.api.nvim_get_current_win()
-    vim.api.nvim_win_set_buf(M.win, buf)
+    local docked = chrome.open_docked_window(state, {
+        height = height,
+        filetype = "csharpexplorer-run",
+        bufname = "CSharpExplorer://Run",
+        focus = opts.focus,
+        cursorline = false,
+        buf = M.buf,
+    })
 
-    vim.wo[M.win].number = false
-    vim.wo[M.win].relativenumber = false
-    vim.wo[M.win].wrap = false
-    vim.wo[M.win].signcolumn = "no"
-
+    M.win = docked.win
+    M.buf = docked.buf
+    setup_keymaps(M.buf)
     M.render()
-
-    if opts.focus == false and prev_win and vim.api.nvim_win_is_valid(prev_win) then
-        pcall(vim.api.nvim_set_current_win, prev_win)
-    end
 
     return M.win
 end
@@ -329,84 +387,6 @@ function M.toggle(state)
     end
 end
 
-local function build_header_lines(sessions, active, win_width)
-    local tab_spans = {}
-    local tab_str = ""
-    for i, s in ipairs(sessions) do
-        local is_active = s.id == active.id
-        local sym, sym_hl = get_status_badge(s.status)
-        local short_url = ""
-        if s.detected_urls and #s.detected_urls > 0 then
-            local port = s.detected_urls[1]:match(":(%d+)")
-            if port then
-                short_url = " :" .. port
-            end
-        end
-
-        local title = string.format("%s%s", s.config.project_name, short_url)
-        local prefix = is_active and string.format("[%d: ", i) or string.format(" %d: ", i)
-        local suffix = is_active and "] " or "  "
-
-        local start_col = #tab_str
-        local sym_col = start_col + #prefix
-        tab_str = tab_str .. prefix .. sym .. " " .. title .. suffix
-        local end_col = #tab_str
-
-        tab_spans[#tab_spans + 1] = {
-            start_col = start_col,
-            end_col = end_col,
-            sym_col = sym_col,
-            sym_len = #sym,
-            sym_hl = sym_hl,
-            is_active = is_active,
-        }
-    end
-
-    local status_txt = active.status
-    if active.status == "starting" and active.stage == "queued" then
-        status_txt = "starting (queued)"
-    elseif active.status == "starting" and active.stage == "building" then
-        status_txt = "building"
-        if active.build_pid then
-            status_txt = status_txt .. " (PID " .. active.build_pid .. ")"
-        end
-    elseif (active.status == "running" or active.status == "stopping") and active.pid then
-        status_txt = status_txt .. " (PID " .. active.pid .. ")"
-    end
-
-    local url_txt = ""
-    if active.detected_urls and #active.detected_urls > 0 then
-        url_txt = "URL: " .. active.detected_urls[1] .. "  "
-    end
-
-    local follow_txt = "Follow: " .. (M.follow_tail and "ON" or "OFF")
-    local bar = string.format(
-        " Status: %s  %s%s  │  [d]ebug attach  [r]estart [s]top [S]top-all [c]lear [f]ollow [p]ick [gx/<CR>]url [?]help [q]hide",
-        status_txt,
-        url_txt,
-        follow_txt
-    )
-
-    local sep = string.rep("─", math.max(win_width, #bar, #tab_str))
-
-    return tab_str, bar, sep, tab_spans
-end
-
-local function apply_tab_extmarks(buf, ns_id, tab_spans)
-    vim.api.nvim_buf_clear_namespace(buf, ns_id, 0, 1)
-    for _, span in ipairs(tab_spans) do
-        local hl = span.is_active and "Title" or "Comment"
-        vim.api.nvim_buf_set_extmark(buf, ns_id, 0, span.start_col, {
-            end_col = span.end_col,
-            hl_group = hl,
-        })
-        vim.api.nvim_buf_set_extmark(buf, ns_id, 0, span.sym_col, {
-            end_col = span.sym_col + span.sym_len,
-            hl_group = span.sym_hl,
-        })
-    end
-end
-
 function M.render()
     if not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then
         return
@@ -420,12 +400,10 @@ function M.render()
         M._rendered_gen = 0
         M._last_rendered_seq = 0
         M._has_placeholder = false
+        update_winbar(sessions, nil)
         local lines = {
-            " [No Active Processes]",
-            " Status: idle  │  [u]run project [U]select profile [gc]compounds [q]hide",
-            string.rep("─", 80),
-            " No active or recent process sessions.",
-            " Press 'u' on a project node in CSharpExplorer or run :CSharpExplorerRun to start a service.",
+            "  No active or recent process sessions.",
+            "  Press 'u' on a project node in CSharpExplorer or run :CSharpExplorerRun to start a service.",
         }
         vim.bo[M.buf].modifiable = true
         vim.api.nvim_buf_set_lines(M.buf, 0, -1, false, lines)
@@ -437,28 +415,18 @@ function M.render()
         M.active_session_id = sessions[1].id
     end
 
-    local win_width = 80
-    if M.win and vim.api.nvim_win_is_valid(M.win) then
-        win_width = vim.api.nvim_win_get_width(M.win)
-    end
-
     local active = process.get_session(M.active_session_id)
-    local tab_str, bar, sep, tab_spans = build_header_lines(sessions, active, win_width)
+    update_winbar(sessions, active)
 
     local log_lines_raw = active.ring_buffer:get_lines()
     local has_placeholder = #log_lines_raw == 0
-    local log_lines = has_placeholder and { " Process started. Waiting for console output..." } or log_lines_raw
-
-    local all_lines = { tab_str, bar, sep }
-    for _, l in ipairs(log_lines) do
-        all_lines[#all_lines + 1] = l
-    end
+    local log_lines = has_placeholder and { "  Process started. Waiting for console output..." } or log_lines_raw
+    local prev_count = vim.api.nvim_buf_line_count(M.buf)
+    local session_changed = M._rendered_session ~= active
 
     vim.bo[M.buf].modifiable = true
-    vim.api.nvim_buf_set_lines(M.buf, 0, -1, false, all_lines)
+    vim.api.nvim_buf_set_lines(M.buf, 0, -1, false, log_lines)
     vim.bo[M.buf].modifiable = false
-
-    apply_tab_extmarks(M.buf, M.ns_id, tab_spans)
 
     M._rendered_session = active
     M._rendered_gen = active.ring_buffer._gen
@@ -466,9 +434,8 @@ function M.render()
     M._has_placeholder = has_placeholder
 
     if M.follow_tail and M.win and vim.api.nvim_win_is_valid(M.win) then
-        local in_visual = vim.api.nvim_get_current_win() == M.win and vim.fn.mode():match("^[vV\22]") ~= nil
-        if not in_visual then
-            pcall(vim.api.nvim_win_set_cursor, M.win, { #all_lines, 0 })
+        if session_changed or chrome.should_auto_scroll(M.win, M.buf, prev_count) then
+            pcall(vim.api.nvim_win_set_cursor, M.win, { #log_lines, 0 })
         end
     end
 end
@@ -490,26 +457,24 @@ function M.append_active_output(session)
         return
     end
 
+    local prev_count = vim.api.nvim_buf_line_count(M.buf)
     vim.bo[M.buf].modifiable = true
     if replaced_all or M._has_placeholder then
-        vim.api.nvim_buf_set_lines(M.buf, 3, -1, false, new_lines)
+        vim.api.nvim_buf_set_lines(M.buf, 0, -1, false, new_lines)
         M._has_placeholder = false
     else
         vim.api.nvim_buf_set_lines(M.buf, -1, -1, false, new_lines)
-        local overflow = vim.api.nvim_buf_line_count(M.buf) - (3 + session.ring_buffer._max)
+        local overflow = vim.api.nvim_buf_line_count(M.buf) - session.ring_buffer._max
         if overflow > 0 then
-            vim.api.nvim_buf_set_lines(M.buf, 3, 3 + overflow, false, {})
+            vim.api.nvim_buf_set_lines(M.buf, 0, overflow, false, {})
         end
     end
     vim.bo[M.buf].modifiable = false
     M._last_rendered_seq = new_seq
 
-    if M.follow_tail and M.win and vim.api.nvim_win_is_valid(M.win) then
-        local in_visual = vim.api.nvim_get_current_win() == M.win and vim.fn.mode():match("^[vV\22]") ~= nil
-        if not in_visual then
-            local count = vim.api.nvim_buf_line_count(M.buf)
-            pcall(vim.api.nvim_win_set_cursor, M.win, { count, 0 })
-        end
+    if M.follow_tail and chrome.should_auto_scroll(M.win, M.buf, prev_count) then
+        local count = vim.api.nvim_buf_line_count(M.buf)
+        pcall(vim.api.nvim_win_set_cursor, M.win, { count, 0 })
     end
 end
 
@@ -530,24 +495,7 @@ function M.render_header()
         return
     end
 
-    if vim.api.nvim_buf_line_count(M.buf) < 4 then
-        M.render()
-        return
-    end
-
-    local win_width = 80
-    if M.win and vim.api.nvim_win_is_valid(M.win) then
-        win_width = vim.api.nvim_win_get_width(M.win)
-    end
-
-    local tab_str, bar, sep, tab_spans = build_header_lines(sessions, active, win_width)
-
-    vim.bo[M.buf].modifiable = true
-    vim.api.nvim_buf_set_lines(M.buf, 0, 3, false, { tab_str, bar, sep })
-    vim.bo[M.buf].modifiable = false
-
-    apply_tab_extmarks(M.buf, M.ns_id, tab_spans)
-
+    update_winbar(sessions, active)
     M.append_active_output(active)
 end
 

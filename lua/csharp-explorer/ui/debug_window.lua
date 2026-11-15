@@ -1,6 +1,8 @@
 local config = require("csharp-explorer.config")
 local debug_engine = require("csharp-explorer.debug")
+local process = require("csharp-explorer.process")
 local chrome = require("csharp-explorer.ui.chrome")
+local theme = require("csharp-explorer.ui.theme")
 local ViewBuilder = require("csharp-explorer.ui.view_builder")
 
 local M = {
@@ -9,6 +11,7 @@ local M = {
     active_session_id = nil,
     current_view = "debugger",
     follow_tail = true,
+    wrap_lines = nil,
     line_items = {},
     ns_id = vim.api.nvim_create_namespace("CSharpExplorerDebugWindow"),
     _rendered_session = nil,
@@ -16,6 +19,13 @@ local M = {
     _last_rendered_seq = 0,
     _has_placeholder = false,
 }
+
+local function is_wrap_enabled()
+    if M.wrap_lines == nil then
+        M.wrap_lines = not (config.current.debug and config.current.debug.wrap == false)
+    end
+    return M.wrap_lines
+end
 
 local KEYMAP_SECTIONS = {
     {
@@ -60,6 +70,7 @@ local KEYMAP_SECTIONS = {
             { key = "X", desc = "Clear all breakpoints" },
             { key = "C / <C-l>", desc = "Clear console log" },
             { key = "f", desc = "Toggle follow-tail scroll" },
+            { key = "w", desc = "Toggle console line wrap" },
         },
     },
     {
@@ -123,10 +134,7 @@ local function open_url_under_cursor_or_active()
         local cursor = vim.api.nvim_win_get_cursor(M.win)
         local line = vim.api.nvim_buf_get_lines(M.buf, cursor[1] - 1, cursor[1], false)[1]
         if line then
-            url = line:match("(https?://[^%s%c\"'<>]+)")
-            if url then
-                url = url:gsub("[%.,;:)%]]+$", "")
-            end
+            url = process.extract_url_at(line, cursor[2] + 1)
         end
     end
     if not url and active and active.detected_urls and #active.detected_urls > 0 then
@@ -273,45 +281,50 @@ local function update_winbar(sessions, active)
         return
     end
 
-    local left_chunks = {}
-    if #sessions == 0 or not active then
-        left_chunks[#left_chunks + 1] = { " [No Active Sessions] ", "CSharpExplorerMuted" }
-    else
-        for i, s in ipairs(sessions) do
-            local is_active = (s.id == active.id)
-            local sym, _ = get_status_badge(s.status)
-            local label = string.format(" %d: %s %s ", i, sym, s.config.project_name)
-            local hl = is_active and "CSharpExplorerTabActive" or "CSharpExplorerTabInactive"
-            left_chunks[#left_chunks + 1] = { label, hl }
-        end
+    local tab_items = {}
+    for i, s in ipairs(sessions) do
+        local is_active = active and (s.id == active.id) or false
+        local sym, _ = get_status_badge(s.status)
+        local proj_name = (s.config and s.config.project_name) or s.name or s.id
+        local label = string.format(" %d: %s %s ", i, sym, proj_name)
+        local hl = is_active and "CSharpExplorerTabActive" or "CSharpExplorerTabInactive"
+        tab_items[#tab_items + 1] = { id = s.id, label = label, hl = hl }
     end
-
-    left_chunks[#left_chunks + 1] = { " │ ", "CSharpExplorerMuted" }
 
     local views = {
-        { id = "debugger", key = "1", label = "Debugger" },
-        { id = "console", key = "2", label = "Console" },
-        { id = "breakpoints", key = "3", label = "Breakpoints" },
+        { id = "debugger", key = "1", label = "Debugger", short = "Dbg" },
+        { id = "console", key = "2", label = "Console", short = "Con" },
+        { id = "breakpoints", key = "3", label = "Breakpoints", short = "Bp" },
     }
-    for _, v in ipairs(views) do
-        local is_cur = (M.current_view == v.id)
-        local pill_txt = string.format(" %s:%s ", v.key, v.label)
-        local pill_hl = is_cur and "CSharpExplorerPillActive" or "CSharpExplorerPillInactive"
-        left_chunks[#left_chunks + 1] = { pill_txt, pill_hl }
-    end
 
-    local right_chunks = {}
-    if active then
-        local status_txt = active.status
-        if active.status == "paused" then
-            local l = (active.current_frame and active.current_frame.line) or "?"
-            status_txt = "paused: L" .. tostring(l)
+    chrome.set_winbar(M.win, function(win_w)
+        local cr, cp = win_w < 80, win_w < 95
+        local pill_chunks = { { " │ ", "CSharpExplorerMuted" } }
+        for _, v in ipairs(views) do
+            local pill_txt = string.format(" %s:%s ", v.key, cp and v.short or v.label)
+            local pill_hl = (M.current_view == v.id) and "CSharpExplorerPillActive" or "CSharpExplorerPillInactive"
+            pill_chunks[#pill_chunks + 1] = { pill_txt, pill_hl }
         end
-        right_chunks[#right_chunks + 1] = { status_txt .. "  ", "CSharpExplorerMuted" }
-    end
-    right_chunks[#right_chunks + 1] = { "? Help ", "CSharpExplorerMuted" }
 
-    chrome.set_winbar(M.win, left_chunks, right_chunks)
+        local right_chunks = {}
+        if active then
+            local l = (active.current_frame and active.current_frame.line) or "?"
+            local status_txt = active.status == "paused" and ("paused: L" .. tostring(l)) or active.status
+            right_chunks[#right_chunks + 1] = { status_txt .. (cr and " " or "  "), "CSharpExplorerMuted" }
+        end
+        if M.current_view == "console" and not is_wrap_enabled() then
+            right_chunks[#right_chunks + 1] = { cr and "W:OFF " or "Wrap: OFF  ", "CSharpExplorerMuted" }
+        end
+        right_chunks[#right_chunks + 1] = { cr and "? " or "? Help ", "CSharpExplorerMuted" }
+
+        local avail_tabs = math.max(12, win_w - theme.chunks_width(right_chunks) - theme.chunks_width(pill_chunks) - 2)
+        local left_chunks = (#sessions == 0 or not active) and { { " [No Active Sessions] ", "CSharpExplorerMuted" } }
+            or chrome.build_tab_chunks({ items = tab_items, active_id = active.id, max_width = avail_tabs })
+        for _, pc in ipairs(pill_chunks) do
+            left_chunks[#left_chunks + 1] = pc
+        end
+        return left_chunks, right_chunks
+    end)
 end
 
 local function setup_keymaps(buf)
@@ -561,6 +574,24 @@ local function setup_keymaps(buf)
         end
     end, vim.tbl_extend("force", opts, { desc = "Toggle follow-tail scroll" }))
 
+    vim.keymap.set("n", "w", function()
+        M.wrap_lines = not is_wrap_enabled()
+        if M.current_view == "console" and M.win and vim.api.nvim_win_is_valid(M.win) then
+            chrome.apply_window_options(M.win, {
+                mode = "log",
+                wrap = M.wrap_lines,
+                cursorline = false,
+                winfixheight = true,
+            })
+            if not M.wrap_lines then
+                chrome.reset_horizontal_scroll(M.win)
+            end
+            local sessions = debug_engine.get_sessions()
+            local active = M.active_session_id and debug_engine.get_session(M.active_session_id)
+            update_winbar(sessions, active)
+        end
+    end, vim.tbl_extend("force", opts, { desc = "Toggle console line wrap" }))
+
     vim.keymap.set("n", "?", show_help_popup, vim.tbl_extend("force", opts, { desc = "Show keyboard shortcuts" }))
 end
 
@@ -676,6 +707,15 @@ function M.render()
     end
 
     local active = M.active_session_id and debug_engine.get_session(M.active_session_id)
+    if M.win and vim.api.nvim_win_is_valid(M.win) then
+        local is_console = M.current_view == "console"
+        chrome.apply_window_options(M.win, {
+            mode = is_console and "log" or "tree",
+            wrap = is_console and is_wrap_enabled() or false,
+            cursorline = not is_console,
+            winfixheight = true,
+        })
+    end
     update_winbar(sessions, active)
 
     local vb = ViewBuilder.new()
@@ -820,9 +860,12 @@ function M.render()
 
     M.line_items = vb:render(M.buf, M.ns_id)
 
-    if M.current_view == "console" and M.follow_tail and M.win and vim.api.nvim_win_is_valid(M.win) then
-        if session_changed or chrome.should_auto_scroll(M.win, M.buf, prev_count) then
+    if M.current_view == "console" and M.win and vim.api.nvim_win_is_valid(M.win) then
+        if M.follow_tail and (session_changed or chrome.should_auto_scroll(M.win, M.buf, prev_count)) then
             pcall(vim.api.nvim_win_set_cursor, M.win, { #vb.lines, 0 })
+        end
+        if not is_wrap_enabled() then
+            chrome.reset_horizontal_scroll(M.win)
         end
     end
 end

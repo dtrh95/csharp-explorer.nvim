@@ -4,6 +4,9 @@ local ViewBuilder = require("csharp-explorer.ui.view_builder")
 
 local M = {}
 
+local winbar_registry = {}
+local winbar_autocmd_ready = false
+
 local function resolve_sidebar_win(state)
     if state and state.win and vim.api.nvim_win_is_valid(state.win) then
         return state.win
@@ -79,11 +82,19 @@ function M.apply_window_options(win, opts)
     end
     theme.ensure()
     opts = opts or {}
-    vim.wo[win].wrap = false
+    local is_log = opts.mode == "log"
+    local wrap = is_log
+    if opts.wrap ~= nil then
+        wrap = opts.wrap == true
+    end
+    vim.wo[win].wrap = wrap
+    vim.wo[win].linebreak = is_log and wrap or false
+    vim.wo[win].breakindent = is_log and wrap or false
+    vim.wo[win].foldenable = false
     vim.wo[win].number = false
     vim.wo[win].relativenumber = false
     vim.wo[win].signcolumn = "no"
-    vim.wo[win].foldcolumn = "0"
+    vim.wo[win].foldcolumn = opts.foldcolumn or (is_log and "1" or "0")
     vim.wo[win].cursorline = opts.cursorline ~= false
     vim.wo[win].fillchars = "eob: "
     if opts.winfixwidth ~= nil then
@@ -93,20 +104,202 @@ function M.apply_window_options(win, opts)
         vim.wo[win].winfixheight = opts.winfixheight == true
     end
     local hl_map = opts.winhighlight
-        or "Normal:CSharpExplorerNormal,NormalNC:CSharpExplorerNormalNC,CursorLine:CSharpExplorerCursorLine,FloatBorder:CSharpExplorerBorder,WinBar:CSharpExplorerWinBar,WinBarNC:CSharpExplorerWinBarNC"
+        or "Normal:CSharpExplorerNormal,NormalNC:CSharpExplorerNormalNC,CursorLine:CSharpExplorerCursorLine,FoldColumn:CSharpExplorerNormal,SignColumn:CSharpExplorerNormal,FloatBorder:CSharpExplorerBorder,WinBar:CSharpExplorerWinBar,WinBarNC:CSharpExplorerWinBarNC"
     vim.wo[win].winhighlight = hl_map
 end
 
-function M.set_winbar(win, left_chunks, right_chunks)
+function M.reset_horizontal_scroll(win)
     if not win or not vim.api.nvim_win_is_valid(win) then
+        return
+    end
+    pcall(vim.api.nvim_win_call, win, function()
+        local view = vim.fn.winsaveview()
+        if view and (view.leftcol or 0) > 0 then
+            view.leftcol = 0
+            vim.fn.winrestview(view)
+        end
+    end)
+end
+
+function M.build_tab_chunks(opts)
+    opts = opts or {}
+    local items = opts.items or {}
+    local budget = math.max(0, opts.max_width or 0)
+    if #items == 0 or budget == 0 then
+        return {}
+    end
+
+    local widths = {}
+    local total_w = 0
+    local active_idx = 1
+    for i, item in ipairs(items) do
+        local w = vim.fn.strdisplaywidth(item.label or "")
+        widths[i] = w
+        total_w = total_w + w
+        if opts.active_id ~= nil and item.id == opts.active_id then
+            active_idx = i
+        end
+    end
+
+    if total_w <= budget then
+        local all = {}
+        for _, item in ipairs(items) do
+            all[#all + 1] = { item.label, item.hl }
+        end
+        return all
+    end
+
+    local function indicator_widths(lo, hi)
+        local lw = lo > 1 and vim.fn.strdisplaywidth(string.format(" ‹ +%d ", lo - 1)) or 0
+        local rw = hi < #items and vim.fn.strdisplaywidth(string.format(" +%d › ", #items - hi)) or 0
+        return lw, rw
+    end
+
+    local lo, hi = active_idx, active_idx
+    local sum_w = widths[active_idx]
+    while lo > 1 or hi < #items do
+        local progressed = false
+        if lo > 1 then
+            local cand_sum = sum_w + widths[lo - 1]
+            local lw, rw = indicator_widths(lo - 1, hi)
+            if cand_sum + lw + rw <= budget then
+                lo = lo - 1
+                sum_w = cand_sum
+                progressed = true
+            end
+        end
+        if hi < #items then
+            local cand_sum = sum_w + widths[hi + 1]
+            local lw, rw = indicator_widths(lo, hi + 1)
+            if cand_sum + lw + rw <= budget then
+                hi = hi + 1
+                sum_w = cand_sum
+                progressed = true
+            end
+        end
+        if not progressed then
+            break
+        end
+    end
+
+    local lw, rw = indicator_widths(lo, hi)
+    if lo == hi and (sum_w + lw + rw > budget) then
+        local cl_ind = lo > 1 and string.format("‹%d", lo - 1) or ""
+        local cr_ind = hi < #items and string.format("%d›", #items - hi) or ""
+        local clw = vim.fn.strdisplaywidth(cl_ind)
+        local crw = vim.fn.strdisplaywidth(cr_ind)
+        local cand_label = items[lo].label or ""
+        if vim.fn.strdisplaywidth(cand_label) + clw + crw > budget and items[lo].compact_label then
+            cand_label = items[lo].compact_label
+        end
+        if vim.fn.strdisplaywidth(cand_label) + clw + crw <= budget then
+            local out = {}
+            if cl_ind ~= "" then
+                out[#out + 1] = { cl_ind, "CSharpExplorerMuted" }
+            end
+            out[#out + 1] = { cand_label, items[lo].hl }
+            if cr_ind ~= "" then
+                out[#out + 1] = { cr_ind, "CSharpExplorerMuted" }
+            end
+            return out
+        end
+        local inner_budget = budget - clw - crw
+        if inner_budget >= 8 then
+            local out = {}
+            if cl_ind ~= "" then
+                out[#out + 1] = { cl_ind, "CSharpExplorerMuted" }
+            end
+            local clipped = theme.truncate_chunks({ { cand_label, items[lo].hl } }, inner_budget)
+            for _, c in ipairs(clipped) do
+                out[#out + 1] = c
+            end
+            if cr_ind ~= "" then
+                out[#out + 1] = { cr_ind, "CSharpExplorerMuted" }
+            end
+            return out
+        end
+        return theme.truncate_chunks({ { cand_label, items[lo].hl } }, budget)
+    end
+
+    local out = {}
+    if lo > 1 then
+        out[#out + 1] = { string.format(" ‹ +%d ", lo - 1), "CSharpExplorerMuted" }
+    end
+    for i = lo, hi do
+        out[#out + 1] = { items[i].label, items[i].hl }
+    end
+    if hi < #items then
+        out[#out + 1] = { string.format(" +%d › ", #items - hi), "CSharpExplorerMuted" }
+    end
+    return out
+end
+
+local function render_registered_winbar(win)
+    local entry = winbar_registry[win]
+    if not entry then
+        return
+    end
+    if not vim.api.nvim_win_is_valid(win) then
+        winbar_registry[win] = nil
         return
     end
     if config.current.ui and config.current.ui.winbar == false then
         vim.wo[win].winbar = ""
         return
     end
-    local formatted = theme.format_winbar(left_chunks, right_chunks)
-    vim.wo[win].winbar = formatted
+    local win_w = vim.api.nvim_win_get_width(win)
+    local left_chunks = entry.left
+    local right_chunks = entry.right
+    if type(entry.left) == "function" then
+        left_chunks, right_chunks = entry.left(win_w)
+    end
+    vim.wo[win].winbar = theme.format_winbar(left_chunks, right_chunks, win_w)
+end
+
+local function ensure_winbar_autocmd()
+    if winbar_autocmd_ready then
+        return
+    end
+    winbar_autocmd_ready = true
+    local group = vim.api.nvim_create_augroup("CSharpExplorerWinBarResize", { clear = true })
+    vim.api.nvim_create_autocmd("WinResized", {
+        group = group,
+        callback = function()
+            local resized = (vim.v.event and vim.v.event.windows) or {}
+            if #resized > 0 then
+                for _, w in ipairs(resized) do
+                    if winbar_registry[w] then
+                        render_registered_winbar(w)
+                    end
+                end
+            else
+                for w, _ in pairs(winbar_registry) do
+                    render_registered_winbar(w)
+                end
+            end
+        end,
+    })
+    vim.api.nvim_create_autocmd("WinClosed", {
+        group = group,
+        callback = function(ev)
+            local closed_win = tonumber(ev.match)
+            if closed_win then
+                winbar_registry[closed_win] = nil
+            end
+        end,
+    })
+end
+
+function M.set_winbar(win, left_chunks, right_chunks)
+    if not win or not vim.api.nvim_win_is_valid(win) then
+        return
+    end
+    ensure_winbar_autocmd()
+    winbar_registry[win] = {
+        left = left_chunks,
+        right = right_chunks,
+    }
+    render_registered_winbar(win)
 end
 
 function M.open_docked_window(state, opts)
@@ -136,7 +329,13 @@ function M.open_docked_window(state, opts)
         vim.bo[buf].undolevels = -1
     end
     vim.api.nvim_win_set_buf(win, buf)
-    M.apply_window_options(win, { winfixheight = true, cursorline = opts.cursorline ~= false })
+    M.apply_window_options(win, {
+        winfixheight = true,
+        cursorline = opts.cursorline ~= false,
+        mode = opts.mode,
+        wrap = opts.wrap,
+        foldcolumn = opts.foldcolumn,
+    })
     if sidebar_win and sb_w and vim.api.nvim_win_is_valid(sidebar_win) then
         pcall(vim.api.nvim_win_set_width, sidebar_win, sb_w)
     end
@@ -206,7 +405,10 @@ function M.open_float(opts)
     local win = vim.api.nvim_open_win(buf, true, win_cfg)
     M.apply_window_options(win, {
         cursorline = opts.cursorline ~= false,
-        winhighlight = "Normal:CSharpExplorerFloatNormal,FloatBorder:CSharpExplorerBorder,CursorLine:CSharpExplorerCursorLine,Title:CSharpExplorerTitle",
+        mode = opts.mode,
+        wrap = opts.wrap,
+        foldcolumn = opts.foldcolumn,
+        winhighlight = "Normal:CSharpExplorerFloatNormal,FoldColumn:CSharpExplorerFloatNormal,SignColumn:CSharpExplorerFloatNormal,FloatBorder:CSharpExplorerBorder,CursorLine:CSharpExplorerCursorLine,Title:CSharpExplorerTitle",
     })
 
     local closed = false

@@ -2,17 +2,17 @@ local config = require("csharp-explorer.config")
 local metadata = require("csharp-explorer.metadata")
 local node_utils = require("csharp-explorer.node")
 local navigation = require("csharp-explorer.actions.navigation")
+local chrome = require("csharp-explorer.ui.chrome")
 local uv = vim.uv or vim.loop
 
 local M = {}
 
 M.build_ns_id = vim.api.nvim_create_namespace("CSharpExplorerBuild")
+M.runner_ns_id = vim.api.nvim_create_namespace("CSharpExplorerRunnerOutput")
 M.current_run = nil
 M.last_run = nil
 M.output_win = nil
 M.output_buf = nil
-M._output_caller_win = nil
-M._output_prev_win = nil
 
 function M.resolve_dotnet()
     local cfg = config.current.orchestration
@@ -136,10 +136,7 @@ function M.resolve_target(state, opts)
                 dir = solution_dir,
                 cwd = solution_dir,
                 solution_path = solution_path,
-                solution_folder = nil,
-                project_node = nil,
                 project_paths = M.collect_child_projects(node),
-                cursor_line = nil,
             }
         elseif node._type == "project" then
             local p_path = node._path and metadata.normalize_path(node._path)
@@ -154,21 +151,16 @@ function M.resolve_target(state, opts)
                 solution_folder = node._parent and M.compute_solution_folder_path(node._parent),
                 project_node = node,
                 project_paths = p_path and { p_path } or {},
-                cursor_line = nil,
             }
         elseif node._type == "folder" then
             if node._dir == nil then
                 return {
                     kind = "solution_folder",
                     name = node._name,
-                    path = nil,
-                    dir = nil,
                     cwd = solution_dir,
                     solution_path = solution_path,
                     solution_folder = M.compute_solution_folder_path(node),
-                    project_node = nil,
                     project_paths = M.collect_child_projects(node),
-                    cursor_line = nil,
                 }
             else
                 local p_node = find_ancestor_project(node)
@@ -182,10 +174,8 @@ function M.resolve_target(state, opts)
                     dir = d_path,
                     cwd = d_path,
                     solution_path = solution_path,
-                    solution_folder = nil,
                     project_node = p_node,
                     project_paths = p_path and { p_path } or {},
-                    cursor_line = nil,
                 }
             end
         elseif node_utils.is_file(node) or node._path then
@@ -201,10 +191,8 @@ function M.resolve_target(state, opts)
                 dir = f_dir,
                 cwd = f_dir or solution_dir,
                 solution_path = solution_path,
-                solution_folder = nil,
                 project_node = p_node,
                 project_paths = p_path and { p_path } or {},
-                cursor_line = nil,
             }
         end
         return nil
@@ -604,94 +592,107 @@ function M.is_running()
     return M.current_run ~= nil and (M.current_run.status == "running" or M.current_run.status == "cancelling")
 end
 
+function M.refresh_output_buf()
+    if not M.output_buf or not vim.api.nvim_buf_is_valid(M.output_buf) then
+        return
+    end
+    local active = M.current_run or M.last_run
+    local raw_lines = (active and active.lines and #active.lines > 0) and active.lines or { "No task output" }
+    local padded_lines = {}
+    for _, l in ipairs(raw_lines) do
+        padded_lines[#padded_lines + 1] = "  " .. l
+    end
+    local prev_count = vim.api.nvim_buf_line_count(M.output_buf)
+    local should_scroll = M.output_win
+        and vim.api.nvim_win_is_valid(M.output_win)
+        and chrome.should_auto_scroll(M.output_win, M.output_buf, prev_count)
+
+    vim.bo[M.output_buf].readonly = false
+    vim.bo[M.output_buf].modifiable = true
+    vim.api.nvim_buf_set_lines(M.output_buf, 0, -1, false, padded_lines)
+    vim.bo[M.output_buf].modifiable = false
+    vim.bo[M.output_buf].readonly = true
+
+    vim.api.nvim_buf_clear_namespace(M.output_buf, M.runner_ns_id, 0, -1)
+    for i, l in ipairs(raw_lines) do
+        local hl = nil
+        if
+            l:find(": error [A-Z]+%d*:")
+            or l:find("Build FAILED")
+            or l:find(": error:")
+            or l:find("Failed!")
+            or l:find("^%s*Failed%s+")
+        then
+            hl = "CSharpExplorerBuildError"
+        elseif l:find(": warning [A-Z]+%d*:") or l:find(": warning:") then
+            hl = "CSharpExplorerBuildWarning"
+        elseif l:find("Build succeeded") or (l:find("Passed!") and not l:find("Failed:%s*[1-9]")) then
+            hl = "CSharpExplorerBuildSuccess"
+        end
+        if hl then
+            pcall(vim.api.nvim_buf_add_highlight, M.output_buf, M.runner_ns_id, hl, i - 1, 0, -1)
+        end
+    end
+
+    if M.output_win and vim.api.nvim_win_is_valid(M.output_win) then
+        local status_label = M.current_run and "Running" or (M.last_run and M.last_run.status or "Idle")
+        local title_text = active and (" " .. (active.title or "Task Output") .. " (" .. status_label .. ") ")
+            or " Task Output "
+        pcall(vim.api.nvim_win_set_config, M.output_win, {
+            title = title_text,
+            title_pos = "center",
+        })
+        if should_scroll then
+            pcall(vim.api.nvim_win_set_cursor, M.output_win, { #padded_lines, 0 })
+        end
+    end
+end
+
 function M.open_output()
     if M.output_win and vim.api.nvim_win_is_valid(M.output_win) then
         return M.output_buf, M.output_win
     end
 
-    local caller_win = vim.api.nvim_get_current_win()
-    local prev_win = vim.fn.win_getid(vim.fn.winnr("#"))
+    local active = M.current_run or M.last_run
+    local status_label = M.current_run and "Running" or (M.last_run and M.last_run.status or "Idle")
+    local title_text = active and ((active.title or "Task Output") .. " (" .. status_label .. ")") or "Task Output"
 
-    local width = math.floor(vim.o.columns * 0.8)
-    local height = math.floor(vim.o.lines * 0.6)
-    local row = math.max(1, math.floor((vim.o.lines - height) / 2))
-    local col = math.max(1, math.floor((vim.o.columns - width) / 2))
-
-    local buf = vim.api.nvim_create_buf(false, true)
-    vim.bo[buf].undolevels = -1
-    vim.bo[buf].buftype = "nofile"
-    vim.bo[buf].bufhidden = "wipe"
-    vim.bo[buf].swapfile = false
-
-    local lines = (M.current_run and M.current_run.lines) or (M.last_run and M.last_run.lines) or { "No task output" }
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-    vim.bo[buf].modifiable = false
-    vim.bo[buf].readonly = true
-
-    local title = M.current_run and (" " .. (M.current_run.title or "Task Output") .. " (Running) ")
-        or (M.last_run and (" " .. (M.last_run.title or "Task Output") .. " (" .. M.last_run.status .. ") "))
-        or " Task Output "
-
-    local win = vim.api.nvim_open_win(buf, true, {
-        relative = "editor",
-        row = row,
-        col = col,
-        width = width,
-        height = height,
-        style = "minimal",
-        border = "rounded",
-        title = title,
-        title_pos = "center",
-        footer = " q / <Esc> to close ",
-        footer_pos = "center",
-    })
-
-    M.output_win = win
-    M.output_buf = buf
-    M._output_caller_win = caller_win
-    M._output_prev_win = prev_win
-
-    local function close_fn()
-        M.close_output()
-    end
-
-    local b_opts = { buffer = buf, silent = true, nowait = true }
-    vim.keymap.set("n", "q", close_fn, b_opts)
-    vim.keymap.set("n", "<Esc>", close_fn, b_opts)
-
-    vim.api.nvim_create_autocmd("BufLeave", {
-        buffer = buf,
-        once = true,
-        callback = function()
-            M.close_output()
+    local float_info = chrome.open_float({
+        width = math.floor(vim.o.columns * 0.8),
+        height = math.floor(vim.o.lines * 0.6),
+        title = title_text,
+        footer = "O / q / <Esc> close",
+        close_keys = { "O" },
+        filetype = "csharpexplorer-output",
+        on_close = function()
+            M.output_win = nil
+            M.output_buf = nil
+            M._output_close = nil
         end,
     })
 
-    if #lines > 0 then
-        pcall(vim.api.nvim_win_set_cursor, win, { #lines, 0 })
-    end
+    M.output_win = float_info.win
+    M.output_buf = float_info.buf
+    M._output_close = float_info.close
 
-    return buf, win
+    M.refresh_output_buf()
+    if M.output_win and vim.api.nvim_win_is_valid(M.output_win) then
+        local lc = vim.api.nvim_buf_line_count(M.output_buf)
+        pcall(vim.api.nvim_win_set_cursor, M.output_win, { lc, 0 })
+    end
+    return M.output_buf, M.output_win
 end
 
 function M.close_output()
-    local caller_win = M._output_caller_win
-    local prev_win = M._output_prev_win
+    local close_fn = M._output_close
+    M._output_close = nil
     local closing_win = M.output_win
-
     M.output_win = nil
     M.output_buf = nil
-    M._output_caller_win = nil
-    M._output_prev_win = nil
-
-    if closing_win and vim.api.nvim_win_is_valid(closing_win) then
+    if close_fn then
+        close_fn()
+    elseif closing_win and vim.api.nvim_win_is_valid(closing_win) then
         pcall(vim.api.nvim_win_close, closing_win, true)
-    end
-    if prev_win and prev_win ~= 0 and prev_win ~= caller_win and vim.api.nvim_win_is_valid(prev_win) then
-        pcall(vim.api.nvim_set_current_win, prev_win)
-    end
-    if caller_win and vim.api.nvim_win_is_valid(caller_win) then
-        pcall(vim.api.nvim_set_current_win, caller_win)
     end
 end
 
@@ -795,53 +796,44 @@ function M.run_pipeline(steps, opts)
     }
     M.current_run = run
 
-    local function sync_output_float()
+    local flush_scheduled = false
+    local function sync_output_float(immediate)
         if M.output_win == nil then
             return
         end
-        vim.schedule(function()
-            if
-                M.output_win
-                and vim.api.nvim_win_is_valid(M.output_win)
-                and M.output_buf
-                and vim.api.nvim_buf_is_valid(M.output_buf)
-            then
-                local active = M.current_run or M.last_run
-                local lines_to_show = (active and active.lines and #active.lines > 0) and active.lines
-                    or { "No task output" }
-                vim.bo[M.output_buf].readonly = false
-                vim.bo[M.output_buf].modifiable = true
-                vim.api.nvim_buf_set_lines(M.output_buf, 0, -1, false, lines_to_show)
-                vim.bo[M.output_buf].modifiable = false
-                vim.bo[M.output_buf].readonly = true
-
-                local status_label = M.current_run and "Running" or (M.last_run and M.last_run.status or "Idle")
-                local title_text = active and (" " .. (active.title or "Task Output") .. " (" .. status_label .. ") ")
-                    or " Task Output "
-                pcall(vim.api.nvim_win_set_config, M.output_win, {
-                    title = title_text,
-                    title_pos = "center",
-                })
-                local count = vim.api.nvim_buf_line_count(M.output_buf)
-                pcall(vim.api.nvim_win_set_cursor, M.output_win, { count, 0 })
-            end
-        end)
+        if immediate then
+            flush_scheduled = false
+            vim.schedule(M.refresh_output_buf)
+            return
+        end
+        if flush_scheduled then
+            return
+        end
+        flush_scheduled = true
+        vim.defer_fn(function()
+            flush_scheduled = false
+            M.refresh_output_buf()
+        end, 40)
     end
 
-    if #run.steps == 0 then
-        run.status = "succeeded"
+    local function finish_pipeline(status, code)
+        run.status = status
         run.finished_at = uv.hrtime()
         M.last_run = run
         M.current_run = nil
-        sync_output_float()
+        sync_output_float(true)
         if opts and opts.on_complete then
             opts.on_complete({
-                status = run.status,
-                exit_code = 0,
+                status = status,
+                exit_code = code or 0,
                 lines = run.lines,
-                output = "",
+                output = table.concat(run.lines, "\n"),
             })
         end
+    end
+
+    if #run.steps == 0 then
+        finish_pipeline("succeeded", 0)
         return run
     end
 
@@ -861,19 +853,7 @@ function M.run_pipeline(steps, opts)
         end
         local step = run.steps[run.current_step]
         if not step then
-            run.status = "succeeded"
-            run.finished_at = uv.hrtime()
-            M.last_run = run
-            M.current_run = nil
-            sync_output_float()
-            if opts and opts.on_complete then
-                opts.on_complete({
-                    status = run.status,
-                    exit_code = run.exit_code or 0,
-                    lines = run.lines,
-                    output = table.concat(run.lines, "\n"),
-                })
-            end
+            finish_pipeline("succeeded", run.exit_code or 0)
             return
         end
 
@@ -881,51 +861,36 @@ function M.run_pipeline(steps, opts)
             append_log_line(">>> " .. step.label)
         end
 
-        local partial_stdout = ""
-        local partial_stderr = ""
+        local partial_stdout = { "" }
+        local partial_stderr = { "" }
 
-        local function on_stdout_chunk(_, data)
-            if data then
-                local combined = partial_stdout .. data
-                local s = 1
-                while true do
-                    local nl = combined:find("\n", s, true)
-                    if not nl then
-                        break
+        local function make_chunk_handler(partial_ref)
+            return function(_, data)
+                if data then
+                    local combined = partial_ref[1] .. data
+                    local s = 1
+                    while true do
+                        local nl = combined:find("\n", s, true)
+                        if not nl then
+                            break
+                        end
+                        local l = combined:sub(s, nl - 1):gsub("\r$", "")
+                        append_log_line(l)
+                        s = nl + 1
                     end
-                    local l = combined:sub(s, nl - 1):gsub("\r$", "")
-                    append_log_line(l)
-                    s = nl + 1
+                    partial_ref[1] = combined:sub(s)
                 end
-                partial_stdout = combined:sub(s)
-            end
-        end
-
-        local function on_stderr_chunk(_, data)
-            if data then
-                local combined = partial_stderr .. data
-                local s = 1
-                while true do
-                    local nl = combined:find("\n", s, true)
-                    if not nl then
-                        break
-                    end
-                    local l = combined:sub(s, nl - 1):gsub("\r$", "")
-                    append_log_line(l)
-                    s = nl + 1
-                end
-                partial_stderr = combined:sub(s)
             end
         end
 
         local function on_step_exit(obj)
-            if partial_stdout ~= "" then
-                append_log_line(partial_stdout:gsub("\r$", ""))
-                partial_stdout = ""
+            if partial_stdout[1] ~= "" then
+                append_log_line(partial_stdout[1]:gsub("\r$", ""))
+                partial_stdout[1] = ""
             end
-            if partial_stderr ~= "" then
-                append_log_line(partial_stderr:gsub("\r$", ""))
-                partial_stderr = ""
+            if partial_stderr[1] ~= "" then
+                append_log_line(partial_stderr[1]:gsub("\r$", ""))
+                partial_stderr[1] = ""
             end
 
             run.exit_code = obj.code
@@ -933,7 +898,6 @@ function M.run_pipeline(steps, opts)
 
             vim.schedule(function()
                 if run.status == "cancelling" then
-                    run.status = "cancelled"
                     if run.cancel_timer then
                         pcall(function()
                             run.cancel_timer:stop()
@@ -941,18 +905,7 @@ function M.run_pipeline(steps, opts)
                         end)
                         run.cancel_timer = nil
                     end
-                    run.finished_at = uv.hrtime()
-                    M.last_run = run
-                    M.current_run = nil
-                    sync_output_float()
-                    if opts and opts.on_complete then
-                        opts.on_complete({
-                            status = "cancelled",
-                            exit_code = obj.code,
-                            lines = run.lines,
-                            output = table.concat(run.lines, "\n"),
-                        })
-                    end
+                    finish_pipeline("cancelled", obj.code)
                     return
                 end
 
@@ -962,42 +915,18 @@ function M.run_pipeline(steps, opts)
                     if run.current_step <= #run.steps then
                         execute_current_step()
                     else
-                        run.status = "succeeded"
-                        run.finished_at = uv.hrtime()
-                        M.last_run = run
-                        M.current_run = nil
-                        sync_output_float()
-                        if opts and opts.on_complete then
-                            opts.on_complete({
-                                status = "succeeded",
-                                exit_code = obj.code,
-                                lines = run.lines,
-                                output = table.concat(run.lines, "\n"),
-                            })
-                        end
+                        finish_pipeline("succeeded", obj.code)
                     end
                 else
-                    run.status = "failed"
-                    run.finished_at = uv.hrtime()
-                    M.last_run = run
-                    M.current_run = nil
-                    sync_output_float()
-                    if opts and opts.on_complete then
-                        opts.on_complete({
-                            status = "failed",
-                            exit_code = obj.code,
-                            lines = run.lines,
-                            output = table.concat(run.lines, "\n"),
-                        })
-                    end
+                    finish_pipeline("failed", obj.code)
                 end
             end)
         end
 
         run.handle = vim.system(step.cmd, {
             cwd = step.cwd,
-            stdout = on_stdout_chunk,
-            stderr = on_stderr_chunk,
+            stdout = make_chunk_handler(partial_stdout),
+            stderr = make_chunk_handler(partial_stderr),
         }, on_step_exit)
     end
 

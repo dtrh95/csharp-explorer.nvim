@@ -3,13 +3,14 @@ local config = require("csharp-explorer.config")
 local node_utils = require("csharp-explorer.node")
 local diagnostics = require("csharp-explorer.diagnostics")
 local navigation = require("csharp-explorer.actions.navigation")
+local chrome = require("csharp-explorer.ui.chrome")
+local ViewBuilder = require("csharp-explorer.ui.view_builder")
 local uv = vim.uv or vim.loop
 
 local M = {
     current_win = nil,
     current_buf = nil,
-    _caller_win = nil,
-    _prev_win = nil,
+    _close_fn = nil,
 }
 
 local FILE_TYPE_NAMES = {
@@ -376,65 +377,38 @@ function M.inspect_node(node, state)
     }
 end
 
-function M.format_model(model)
-    local max_lbl = 0
-    for _, row in ipairs(model.rows) do
-        if #row.label > max_lbl then
-            max_lbl = #row.label
-        end
-    end
-    if max_lbl < 12 then
-        max_lbl = 12
-    end
-
-    local lines = {}
-    local hl_map = {}
-
-    table.insert(lines, "")
-    for _, row in ipairs(model.rows) do
-        local line = string.format("  %-" .. max_lbl .. "s :  %s", row.label, row.value)
-        table.insert(lines, line)
-        local l_idx = #lines - 1
-        table.insert(hl_map, { line = l_idx, col_start = 2, col_end = 2 + #row.label, hl = "Directory" })
-        table.insert(hl_map, { line = l_idx, col_start = 2 + max_lbl + 1, col_end = 2 + max_lbl + 2, hl = "Delimiter" })
-        table.insert(hl_map, { line = l_idx, col_start = 2 + max_lbl + 4, col_end = #line, hl = "Normal" })
-    end
-    table.insert(lines, "")
-
-    return lines, hl_map
-end
-
 function M.close()
-    local caller_win = M._caller_win
-    local prev_win = M._prev_win
+    local close_fn = M._close_fn
+    M._close_fn = nil
     local closing_win = M.current_win
     M.current_win = nil
     M.current_buf = nil
-    M._caller_win = nil
-    M._prev_win = nil
-
-    if closing_win and vim.api.nvim_win_is_valid(closing_win) then
+    if close_fn then
+        close_fn()
+    elseif closing_win and vim.api.nvim_win_is_valid(closing_win) then
         pcall(vim.api.nvim_win_close, closing_win, true)
-    end
-    if prev_win and prev_win ~= 0 and prev_win ~= caller_win and vim.api.nvim_win_is_valid(prev_win) then
-        pcall(vim.api.nvim_set_current_win, prev_win)
-    end
-    if caller_win and vim.api.nvim_win_is_valid(caller_win) then
-        pcall(vim.api.nvim_set_current_win, caller_win)
     end
 end
 
 function M.show_node(node, state)
     M.close()
 
-    local caller_win = vim.api.nvim_get_current_win()
-    local prev_win = vim.fn.win_getid(vim.fn.winnr("#"))
-
     local model = M.inspect_node(node, state)
-    local lines, hl_map = M.format_model(model)
+    local vb = ViewBuilder.new()
+    vb:add_line("")
+    local rows = {}
+    for _, r in ipairs(model.rows) do
+        rows[#rows + 1] = { label = r.label, sep = ":", value = r.value }
+    end
+    vb:add_columns(rows, {
+        { key = "label", hl = "CSharpExplorerKey" },
+        { key = "sep", hl = "CSharpExplorerMuted", width = 1 },
+        { key = "value", hl = "CSharpExplorerNormal" },
+    }, { left_pad = "  ", gap = "  " })
+    vb:add_line("")
 
     local max_len = 0
-    for _, l in ipairs(lines) do
+    for _, l in ipairs(vb.lines) do
         local width = vim.fn.strdisplaywidth(l)
         if width > max_len then
             max_len = width
@@ -443,66 +417,30 @@ function M.show_node(node, state)
 
     local cfg_width = (config.current.properties and config.current.properties.max_width) or 76
     local width = math.max(45, math.min(max_len + 4, cfg_width))
-    local height = #lines
+    local height = #vb.lines
 
-    local row = math.max(1, math.floor((vim.o.lines - height) / 2))
-    local col = math.max(1, math.floor((vim.o.columns - width) / 2))
-
-    local buf = vim.api.nvim_create_buf(false, true)
-    vim.bo[buf].undolevels = -1
-    vim.bo[buf].buftype = "nofile"
-    vim.bo[buf].bufhidden = "wipe"
-    vim.bo[buf].swapfile = false
-
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-
-    local ns = vim.api.nvim_create_namespace("CSharpExplorerProperties")
-    for _, h in ipairs(hl_map) do
-        pcall(vim.api.nvim_buf_add_highlight, buf, ns, h.hl, h.line, h.col_start, h.col_end)
-    end
-
-    vim.bo[buf].modifiable = false
-    vim.bo[buf].readonly = true
-
-    local border = (config.current.properties and config.current.properties.border) or "rounded"
-    local win = vim.api.nvim_open_win(buf, true, {
-        relative = "editor",
-        row = row,
-        col = col,
+    local float_info = chrome.open_float({
+        title = model.title,
+        footer = "K / q / <Esc> close",
+        close_keys = { "<CR>", "K" },
         width = width,
         height = height,
-        style = "minimal",
-        border = border,
-        title = " " .. model.title .. " ",
-        title_pos = "center",
-        footer = " q / <Esc> to close ",
-        footer_pos = "center",
-    })
-
-    M.current_win = win
-    M.current_buf = buf
-    M._caller_win = caller_win
-    M._prev_win = prev_win
-
-    local function close_fn()
-        M.close()
-    end
-
-    local b_opts = { buffer = buf, silent = true, nowait = true }
-    vim.keymap.set("n", "q", close_fn, b_opts)
-    vim.keymap.set("n", "<Esc>", close_fn, b_opts)
-    vim.keymap.set("n", "<CR>", close_fn, b_opts)
-    vim.keymap.set("n", "K", close_fn, b_opts)
-
-    vim.api.nvim_create_autocmd("BufLeave", {
-        buffer = buf,
-        once = true,
-        callback = function()
-            M.close()
+        filetype = "csharpexplorer-properties",
+        on_close = function()
+            M.current_win = nil
+            M.current_buf = nil
+            M._close_fn = nil
         end,
     })
 
-    return buf, win
+    M.current_win = float_info.win
+    M.current_buf = float_info.buf
+    M._close_fn = float_info.close
+
+    local ns = vim.api.nvim_create_namespace("CSharpExplorerProperties")
+    vb:render(float_info.buf, ns)
+
+    return float_info.buf, float_info.win
 end
 
 function M.open(state)

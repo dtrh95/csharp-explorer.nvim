@@ -1,6 +1,8 @@
 local config = require("csharp-explorer.config")
 local metadata = require("csharp-explorer.metadata")
 local run_config = require("csharp-explorer.run_config")
+local chrome = require("csharp-explorer.ui.chrome")
+local ViewBuilder = require("csharp-explorer.ui.view_builder")
 local uv = vim.uv or vim.loop
 
 local M = {}
@@ -269,7 +271,8 @@ function M.resolve_item_config(item, all_cfgs, solution_dir)
     return candidates[1]
 end
 
-local function select_items_loop(state, name, initial_items, on_save)
+function M.open_editor(state, opts)
+    opts = opts or {}
     if state and not state.tree and type(state.ensure_tree) == "function" then
         state.ensure_tree()
     end
@@ -281,12 +284,24 @@ local function select_items_loop(state, name, initial_items, on_save)
         return
     end
 
+    local name = opts.name or "New Compound"
+    local stop_together = opts.stop_together ~= false
     local selected = {}
+    local selection_order = {}
     local existing_meta = {}
-    for _, item in ipairs(initial_items or {}) do
+    local cfg_by_key = {}
+
+    for _, cfg in ipairs(all_cfgs) do
+        cfg_by_key[cfg.project_path .. ":" .. cfg.profile_name] = cfg
+    end
+
+    for _, item in ipairs(opts.items or {}) do
         local resolved = M.resolve_item_config(item, all_cfgs, solution_dir)
         if resolved then
             local key = resolved.project_path .. ":" .. resolved.profile_name
+            if not selected[key] then
+                selection_order[#selection_order + 1] = key
+            end
             selected[key] = item.mode or "run"
             existing_meta[key] = {
                 delay_ms = item.delay_ms or 0,
@@ -295,70 +310,148 @@ local function select_items_loop(state, name, initial_items, on_save)
         end
     end
 
-    local function prompt_menu()
-        local items = {}
-        for _, cfg in ipairs(all_cfgs) do
+    local width = math.min(math.floor(vim.o.columns * 0.8), 70)
+    local height = math.min(math.floor(vim.o.lines * 0.7), #all_cfgs + 7)
+
+    local editor_ns = vim.api.nvim_create_namespace("CSharpExplorerCompoundEditor")
+    local float_info = nil
+    local line_items = {}
+
+    local function redraw()
+        local vb = ViewBuilder.new()
+        vb:add_line("")
+        local stop_mark = stop_together and "[x]" or "[ ]"
+        local stop_hl = stop_together and "CSharpExplorerFilterActive" or "CSharpExplorerFilterInactive"
+        vb:add_chunks({
+            { "  Stop together: ", "CSharpExplorerNormal" },
+            { stop_mark .. " ", stop_hl },
+            { "(stop all projects if one exits)", "CSharpExplorerMuted" },
+        }, { type = "header" })
+        vb:add_line("")
+
+        vb:add_section("Project Profiles")
+        for idx, cfg in ipairs(all_cfgs) do
             local key = cfg.project_path .. ":" .. cfg.profile_name
             local mode = selected[key]
-            local check = "[ ] "
+            local pill_txt = "[   ]"
+            local pill_hl = "CSharpExplorerMuted"
             if mode == "run" then
-                check = "[Run] "
+                pill_txt = "[Run]"
+                pill_hl = "CSharpExplorerBadgeOk"
             elseif mode == "debug" then
-                check = "[Debug] "
+                pill_txt = "[Debug]"
+                pill_hl = "CSharpExplorerBadgeWarn"
             end
-            items[#items + 1] = check .. cfg.name
+            local label = string.format("%s (%s)", cfg.project_name, cfg.profile_name)
+            vb:add_chunks({
+                { "  " .. pill_txt .. "   ", pill_hl },
+                { label, "CSharpExplorerNormal" },
+            }, { type = "item", index = idx, cfg = cfg })
         end
-        items[#items + 1] = "--- Actions ---"
-        items[#items + 1] = "[Save & Run]"
-        items[#items + 1] = "[Save]"
-        items[#items + 1] = "[Cancel]"
+        vb:add_line("")
 
-        vim.ui.select(items, { prompt = "Compound: " .. name .. " (Select projects):" }, function(choice, idx)
-            if not choice or choice == "[Cancel]" or choice == "--- Actions ---" then
-                return
-            end
-            if choice == "[Save]" or choice == "[Save & Run]" then
-                local chosen_items = {}
-                for _, cfg in ipairs(all_cfgs) do
-                    local key = cfg.project_path .. ":" .. cfg.profile_name
-                    if selected[key] then
-                        local prev = existing_meta[key]
-                        chosen_items[#chosen_items + 1] = {
-                            project_path = cfg.project_path,
-                            project_name = cfg.project_name,
-                            profile_name = cfg.profile_name,
-                            delay_ms = prev and prev.delay_ms or 0,
-                            hot_reload = prev and prev.hot_reload or nil,
-                            mode = selected[key] or "run",
-                        }
-                    end
-                end
-                if #chosen_items == 0 then
-                    vim.notify("Select at least one project profile before saving.", vim.log.levels.WARN)
-                    prompt_menu()
-                    return
-                end
-                on_save(chosen_items, choice == "[Save & Run]")
-                return
-            end
+        local cur_pos = nil
+        if float_info and vim.api.nvim_win_is_valid(float_info.win) then
+            cur_pos = vim.api.nvim_win_get_cursor(float_info.win)
+        end
 
-            local cfg = all_cfgs[idx]
-            if cfg then
-                local key = cfg.project_path .. ":" .. cfg.profile_name
-                local curr = selected[key]
-                if not curr then
-                    selected[key] = "run"
-                elseif curr == "run" then
-                    selected[key] = "debug"
-                else
-                    selected[key] = nil
-                end
-            end
-            prompt_menu()
-        end)
+        line_items = vb:render(float_info.buf, editor_ns)
+
+        if cur_pos and float_info and vim.api.nvim_win_is_valid(float_info.win) then
+            local max_r = vim.api.nvim_buf_line_count(float_info.buf)
+            pcall(vim.api.nvim_win_set_cursor, float_info.win, { math.min(cur_pos[1], max_r), cur_pos[2] })
+        end
     end
 
-    prompt_menu()
+    local function do_save(run_now)
+        local chosen_items = {}
+        for _, key in ipairs(selection_order) do
+            local cfg = cfg_by_key[key]
+            if cfg and selected[key] then
+                local prev = existing_meta[key]
+                chosen_items[#chosen_items + 1] = {
+                    project_path = cfg.project_path,
+                    project_name = cfg.project_name,
+                    profile_name = cfg.profile_name,
+                    delay_ms = prev and prev.delay_ms or 0,
+                    hot_reload = prev and prev.hot_reload or nil,
+                    mode = selected[key] or "run",
+                }
+            end
+        end
+        if #chosen_items == 0 then
+            vim.notify("Select at least one project profile before saving.", vim.log.levels.WARN)
+            return
+        end
+        float_info.close()
+        if opts.on_save then
+            opts.on_save(chosen_items, stop_together, run_now)
+        else
+            M.create_compound(state, {
+                id = opts.id,
+                name = name,
+                items = chosen_items,
+                stop_together = stop_together,
+                run = run_now,
+            })
+            vim.notify("Saved compound: " .. name, vim.log.levels.INFO)
+        end
+    end
+
+    local function toggle_cursor_row()
+        local lnum = vim.api.nvim_win_get_cursor(float_info.win)[1]
+        local item = line_items[lnum]
+        if item and item.type == "item" then
+            local key = item.cfg.project_path .. ":" .. item.cfg.profile_name
+            local curr = selected[key]
+            if not curr then
+                selected[key] = "run"
+                selection_order[#selection_order + 1] = key
+            elseif curr == "run" then
+                selected[key] = "debug"
+            else
+                selected[key] = nil
+                for i, k in ipairs(selection_order) do
+                    if k == key then
+                        table.remove(selection_order, i)
+                        break
+                    end
+                end
+            end
+            redraw()
+        elseif item and item.type == "header" then
+            stop_together = not stop_together
+            redraw()
+        end
+    end
+
+    local keymaps = {
+        ["<Space>"] = toggle_cursor_row,
+        ["<CR>"] = toggle_cursor_row,
+        ["t"] = function()
+            stop_together = not stop_together
+            redraw()
+        end,
+        ["s"] = function()
+            do_save(false)
+        end,
+        ["R"] = function()
+            do_save(true)
+        end,
+    }
+
+    float_info = chrome.open_float({
+        title = "Compound: " .. name,
+        footer = "<Space> cycle mode · t stop together · s save · R save & run · q cancel",
+        width = width,
+        height = height,
+        filetype = "csharpexplorer-compound",
+        close_on_bufleave = false,
+        keymaps = keymaps,
+    })
+
+    redraw()
+    return float_info
 end
 
 function M.manage_compounds(state)
@@ -367,20 +460,20 @@ function M.manage_compounds(state)
     local actions_map = {}
 
     for _, c in ipairs(compounds) do
-        local run_label = "Run: " .. c.name .. " (" .. #c.items .. " projects)"
-        local debug_label = "Debug: " .. c.name .. " (" .. #c.items .. " projects)"
+        local run_label = "Run compound: " .. c.name .. " (" .. #c.items .. " projects)"
+        local debug_label = "Debug compound: " .. c.name .. " (" .. #c.items .. " projects)"
         menu_items[#menu_items + 1] = run_label
         menu_items[#menu_items + 1] = debug_label
         actions_map[run_label] = { action = "run", compound = c }
         actions_map[debug_label] = { action = "debug", compound = c }
     end
-    menu_items[#menu_items + 1] = "[+] Create New Compound"
+    menu_items[#menu_items + 1] = "Create compound"
     if #compounds > 0 then
-        menu_items[#menu_items + 1] = "[~] Edit Compound"
-        menu_items[#menu_items + 1] = "[-] Delete Compound"
+        menu_items[#menu_items + 1] = "Edit compound"
+        menu_items[#menu_items + 1] = "Delete compound"
     end
 
-    vim.ui.select(menu_items, { prompt = "Manage Compound Configurations:" }, function(choice, _idx)
+    vim.ui.select(menu_items, { prompt = "Manage compound configurations:" }, function(choice, _idx)
         if not choice then
             return
         end
@@ -405,30 +498,22 @@ function M.manage_compounds(state)
             return
         end
 
-        if choice == "[+] Create New Compound" then
-            vim.ui.input({ prompt = "Compound Name: " }, function(name)
+        if choice == "Create compound" then
+            vim.ui.input({ prompt = "Compound name: " }, function(name)
                 if not name or vim.trim(name) == "" then
                     return
                 end
-                name = vim.trim(name)
-                select_items_loop(state, name, {}, function(items, run_now)
-                    M.create_compound(state, {
-                        name = name,
-                        items = items,
-                        run = run_now,
-                    })
-                    vim.notify("Created compound: " .. name, vim.log.levels.INFO)
-                end)
+                M.open_editor(state, { name = vim.trim(name) })
             end)
             return
         end
 
-        if choice == "[~] Edit Compound" then
+        if choice == "Edit compound" then
             local comp_names = {}
             for _, c in ipairs(compounds) do
                 comp_names[#comp_names + 1] = c.name
             end
-            vim.ui.select(comp_names, { prompt = "Select Compound to Edit:" }, function(sel_name)
+            vim.ui.select(comp_names, { prompt = "Select compound to edit:" }, function(sel_name)
                 if not sel_name then
                     return
                 end
@@ -436,21 +521,17 @@ function M.manage_compounds(state)
                 if not comp then
                     return
                 end
-                select_items_loop(state, comp.name, comp.items, function(items, run_now)
-                    M.create_compound(state, {
-                        id = comp.id,
-                        name = comp.name,
-                        items = items,
-                        stop_together = comp.stop_together,
-                        run = run_now,
-                    })
-                    vim.notify("Updated compound: " .. comp.name, vim.log.levels.INFO)
-                end)
+                M.open_editor(state, {
+                    id = comp.id,
+                    name = comp.name,
+                    items = comp.items,
+                    stop_together = comp.stop_together,
+                })
             end)
             return
         end
 
-        if choice == "[-] Delete Compound" then
+        if choice == "Delete compound" then
             local comp_names = {}
             for _, c in ipairs(compounds) do
                 if c.source == "file" then
@@ -461,7 +542,7 @@ function M.manage_compounds(state)
                 vim.notify("No workspace compounds available to delete.", vim.log.levels.INFO)
                 return
             end
-            vim.ui.select(comp_names, { prompt = "Select Workspace Compound to Delete:" }, function(sel_name)
+            vim.ui.select(comp_names, { prompt = "Select compound to delete:" }, function(sel_name)
                 if not sel_name then
                     return
                 end

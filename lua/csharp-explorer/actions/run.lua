@@ -151,7 +151,7 @@ function M.select_run_profile(state, opts)
     end
 
     vim.ui.select(entries, {
-        prompt = "Select Run Profile or Compound:",
+        prompt = "Select run target:",
         format_item = function(item)
             return item.label
         end,
@@ -180,7 +180,7 @@ function M.run_compound(state, compound_or_name, _opts)
         for _, c in ipairs(compounds) do
             labels[#labels + 1] = string.format("%s (%d projects)", c.name, #c.items)
         end
-        vim.ui.select(labels, { prompt = "Select Compound to Run:" }, function(_, idx)
+        vim.ui.select(labels, { prompt = "Select compound to run:" }, function(_, idx)
             if idx and compounds[idx] then
                 M.run_compound(state, compounds[idx])
             end

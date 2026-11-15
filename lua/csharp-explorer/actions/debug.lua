@@ -122,7 +122,7 @@ function M.select_debug_profile(state, opts)
         end
 
         entries[#entries + 1] = {
-            label = "⚡ Attach to Running Process...",
+            label = "Attach debugger to process",
             is_attach = true,
         }
     end
@@ -133,7 +133,7 @@ function M.select_debug_profile(state, opts)
     end
 
     vim.ui.select(entries, {
-        prompt = "Select Debug Profile, Compound, or Action:",
+        prompt = "Select debug target:",
         format_item = function(item)
             return item.label
         end,

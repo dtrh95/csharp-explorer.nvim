@@ -449,30 +449,43 @@ function M.add(state, opts)
     end
 end
 
+local function format_menu_label(text, keymap_id)
+    if not keymap_id then
+        return text
+    end
+    local km = config.current.keymaps and config.current.keymaps[keymap_id]
+    if type(km) == "table" then
+        km = km[1]
+    end
+    if type(km) == "string" and km ~= "" then
+        return string.format("%s [%s]", text, km)
+    end
+    return text
+end
+
 function M.action_menu(state)
     local target = runner.resolve_target(state)
-    local target_name = target and target.name or "Workspace"
     local items = {
         {
-            label = "Build (" .. target_name .. ")",
+            label = format_menu_label("Build target", "build"),
             action = function()
                 require("csharp-explorer.actions.build").build(state)
             end,
         },
         {
-            label = "Restore (" .. target_name .. ")",
+            label = format_menu_label("Restore dependencies", "restore"),
             action = function()
                 require("csharp-explorer.actions.build").restore(state)
             end,
         },
         {
-            label = "Clean (" .. target_name .. ")",
+            label = format_menu_label("Clean build output", "clean"),
             action = function()
                 require("csharp-explorer.actions.build").clean(state)
             end,
         },
         {
-            label = "Run Tests (" .. target_name .. ")",
+            label = format_menu_label("Run tests", "test"),
             action = function()
                 require("csharp-explorer.actions.test").run_target(state)
             end,
@@ -481,7 +494,7 @@ function M.action_menu(state)
 
     if target and target.kind == "file" and target.path and target.path:match("%.cs$") then
         table.insert(items, {
-            label = "Select Test in " .. target_name,
+            label = "Select test to run",
             action = function()
                 require("csharp-explorer.actions.test").select_test(state)
             end,
@@ -489,80 +502,80 @@ function M.action_menu(state)
     end
 
     table.insert(items, {
-        label = "Run Project (u)",
+        label = format_menu_label("Run project", "run"),
         action = function()
             require("csharp-explorer.actions.run").run_target(state)
         end,
     })
     table.insert(items, {
-        label = "Select Run Profile / Compound (U)",
+        label = format_menu_label("Select run profile", "run_select"),
         action = function()
             require("csharp-explorer.actions.run").select_run_profile(state)
         end,
     })
     table.insert(items, {
-        label = "Toggle Run Tool Window (L)",
+        label = format_menu_label("Toggle run window", "run_window"),
         action = function()
             require("csharp-explorer.actions.run").toggle_run_window(state)
         end,
     })
     table.insert(items, {
-        label = "Debug Project (D)",
+        label = format_menu_label("Debug project", "debug"),
         action = function()
             require("csharp-explorer.actions.debug").debug_target(state)
         end,
     })
     table.insert(items, {
-        label = "Debug Profile / Compound... (gD)",
+        label = format_menu_label("Select debug profile", "debug_select"),
         action = function()
             require("csharp-explorer.actions.debug").select_debug_profile(state)
         end,
     })
     table.insert(items, {
-        label = "Attach Debugger...",
+        label = "Attach debugger to process",
         action = function()
             require("csharp-explorer.actions.debug").attach_debugger(state)
         end,
     })
     table.insert(items, {
-        label = "Debug Unit Tests (gT)",
+        label = format_menu_label("Debug unit tests", "debug_test"),
         action = function()
             require("csharp-explorer.actions.test").debug_test(state)
         end,
     })
     table.insert(items, {
-        label = "Toggle Debug Window (M)",
+        label = format_menu_label("Toggle debug window", "debug_window"),
         action = function()
             require("csharp-explorer.ui.debug_window").toggle(state)
         end,
     })
     table.insert(items, {
-        label = "Manage Compounds (gc)",
+        label = format_menu_label("Manage compounds", "manage_compounds"),
         action = function()
             require("csharp-explorer.compound").manage_compounds(state)
         end,
     })
     table.insert(items, {
-        label = "Reload All Projects & LSPs (gR)",
+        label = format_menu_label("Reload projects and LSP", "reload_all"),
         action = function()
             require("csharp-explorer.reload").reload_all(state)
         end,
     })
 
     table.insert(items, {
-        label = "Add C# Item...",
+        label = format_menu_label("Add C# item", "add"),
         action = function()
             M.add_item(state)
         end,
     })
     table.insert(items, {
-        label = "Add .NET Project...",
+        label = "Add .NET project",
         action = function()
             M.add_project(state)
         end,
     })
     table.insert(items, {
-        label = "Task Output",
+        label = format_menu_label("Toggle task output", "task_output"),
         action = function()
             runner.toggle_output()
         end,
@@ -570,7 +583,7 @@ function M.action_menu(state)
 
     if runner.is_running() then
         table.insert(items, {
-            label = "Cancel Running Task",
+            label = format_menu_label("Cancel running task", "cancel_task"),
             action = function()
                 runner.cancel()
             end,
@@ -579,7 +592,7 @@ function M.action_menu(state)
 
     if target and target.project_node and target.project_node._path then
         table.insert(items, {
-            label = "Open .csproj",
+            label = format_menu_label("Open project file", "open_properties"),
             action = function()
                 navigation.focus_editor_window(state)
                 vim.cmd("edit " .. vim.fn.fnameescape(target.project_node._path))
@@ -588,50 +601,50 @@ function M.action_menu(state)
     end
 
     table.insert(items, {
-        label = "Item Properties",
+        label = format_menu_label("Show item properties", "item_properties"),
         action = function()
             require("csharp-explorer.actions.properties").open(state)()
         end,
     })
     table.insert(items, {
-        label = "Safe Rename...",
+        label = format_menu_label("Rename item", "rename"),
         action = function()
             require("csharp-explorer.actions.refactor").rename(state)
         end,
     })
     table.insert(items, {
-        label = "Safe Delete...",
+        label = format_menu_label("Delete item", "delete"),
         action = function()
             require("csharp-explorer.actions.refactor").delete(state)
         end,
     })
     table.insert(items, {
-        label = "Sync Namespace",
+        label = format_menu_label("Sync namespace", "sync_namespace"),
         action = function()
             require("csharp-explorer.actions.namespace").sync_target(state)
         end,
     })
     table.insert(items, {
-        label = "Search Text in Solution...",
+        label = format_menu_label("Search text in solution", "search_text"),
         action = function()
             require("csharp-explorer.actions.search").grep(state)
         end,
     })
     table.insert(items, {
-        label = "Search Symbols in Solution...",
+        label = format_menu_label("Search symbols in solution", "search_symbols"),
         action = function()
             require("csharp-explorer.actions.search").symbols(state)
         end,
     })
     table.insert(items, {
-        label = "Find Files in Solution...",
+        label = format_menu_label("Find files in solution", "find_files"),
         action = function()
             require("csharp-explorer.actions.search").files(state)
         end,
     })
 
     vim.ui.select(items, {
-        prompt = "CSharp Explorer Actions:",
+        prompt = "CSharp Explorer actions:",
         format_item = function(item)
             return item.label
         end,

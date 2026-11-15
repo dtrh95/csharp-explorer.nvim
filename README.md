@@ -30,8 +30,11 @@ A lightweight C# Solution Explorer for Neovim that renders `.sln` and `.slnx` hi
 - **Run-to-Attach Debugging**: Press `d` inside the Run Tool Window to attach `netcoredbg` to the active running process without restarting the service. Detaching leaves the service alive and serving requests.
 - **Unit Test Debugging**: Debug the nearest test method or test class with `:CSharpExplorerTestDebugNearest` or debug target tests with `gT`. Uses `VSTEST_HOST_DEBUG=1` to attach to the test host and pause on breakpoints in test code.
 - **Mixed Run and Debug Compounds**: Group background run services and foreground debugged services in `.csharp-explorer/compounds.json` or Lua configuration. Compounds serialize background builds and manage simultaneous processes with unified shutdown.
+- **Sticky Winbars and Tool Window Chrome**: The explorer sidebar, run window, and debug window render sticky winbars with active session tabs, view tabs, process status badges, and shortcut hints. Floating dialogs use centered titles, rounded borders, and footer shortcut hints.
+- **Contextual Keymap Help**: Press `?` in the explorer sidebar, run tool window, or debug tool window to open a categorized modal cheatsheet showing active keybindings and shortcuts.
+- **Theme Integration**: Defines semantic `CSharpExplorer*` highlight groups linked to standard Neovim highlight tokens, providing consistent styling across dark and light color schemes with graceful fallback defaults.
 - **Tree Process Status Badges**: Projects with active processes show right-aligned badges in the explorer tree, such as `● :5189` for listening web services, `● debug` for debugged sessions, `⏸ L21` for paused breakpoints, `◐ building`, or `▲ exit 1` on failure.
-- **Compound Run Configurations**: Group multiple runnable projects into compound bundles in `.csharp-explorer/compounds.json` or Lua setup config. Press `gc` or run `:CSharpExplorerCompoundManage` to run, create, edit, or delete compounds.
+- **Compound Run Configurations**: Group multiple runnable projects into compound bundles in `.csharp-explorer/compounds.json` or Lua setup config. Press `gc` or run `:CSharpExplorerCompoundManage` to open the interactive checklist editor where you can select member projects, configure launch profiles, run, edit, or delete compounds.
 - **Project Reload and LSP Recovery**: Press `gR` or run `:CSharpExplorerReloadProjects` to reload all projects in the solution. Writes modified solution buffers, clears metadata and build diagnostics, re-parses the solution while keeping expanded folders open, rebuilds the diagnostic index, restarts active C# language servers, and resurrects crashed language servers across loaded C# buffers.
 
 ## Prerequisites
@@ -95,10 +98,10 @@ require("csharp-explorer").setup({
         project_reference = "󰌛 ",
     },
     project_highlights = {
-        web = "Special",
-        console = "Function",
-        library = "Type",
-        test = "DiagnosticOk",
+        web = "CSharpExplorerTreeProjectWeb",
+        console = "CSharpExplorerTreeProjectConsole",
+        library = "CSharpExplorerTreeProjectLib",
+        test = "CSharpExplorerTreeProjectTest",
     },
     dynamic_icons = {
         enabled = true,
@@ -149,14 +152,17 @@ require("csharp-explorer").setup({
         compounds = {},
     },
     debug = {
-        enabled = true,
-        auto_open_window = true,
-        focus_on_break = true,
-        window_height = 14,
-        stop_at_entry = false,
+        adapter_cmd = nil,
         just_my_code = true,
+        stop_at_entry = false,
+        auto_open_window = true,
+        focus_on_break = false,
+        window_height = 14,
         max_log_lines = 5000,
+        auto_scroll = true,
+        eval_timeout_ms = 5000,
         vstest_timeout_ms = 20000,
+        exception_filters = { "user-unhandled" },
     },
     filter = {
         gitignored = true,
@@ -175,8 +181,11 @@ require("csharp-explorer").setup({
     ui = {
         width = 30,
         sync_nvim_tree_width = true,
+        winbar = true,
+        border = "rounded",
     },
     keymaps = {
+        help = "?",
         close = "q",
         open = { "<CR>", "o", "<2-LeftMouse>" },
         vsplit = "<C-v>",

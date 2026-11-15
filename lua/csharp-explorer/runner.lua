@@ -663,6 +663,7 @@ function M.open_output()
         title = title_text,
         footer = "O / q / <Esc> close",
         close_keys = { "O" },
+        wrap = true,
         filetype = "csharpexplorer-output",
         on_close = function()
             M.output_win = nil

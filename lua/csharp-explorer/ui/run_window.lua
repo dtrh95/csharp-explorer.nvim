@@ -1,18 +1,27 @@
 local config = require("csharp-explorer.config")
 local process = require("csharp-explorer.process")
 local chrome = require("csharp-explorer.ui.chrome")
+local theme = require("csharp-explorer.ui.theme")
 
 local M = {
     buf = nil,
     win = nil,
     active_session_id = nil,
     follow_tail = true,
+    wrap_lines = nil,
     ns_id = vim.api.nvim_create_namespace("CSharpExplorerRunWindow"),
     _rendered_session = nil,
     _rendered_gen = 0,
     _last_rendered_seq = 0,
     _has_placeholder = false,
 }
+
+local function is_wrap_enabled()
+    if M.wrap_lines == nil then
+        M.wrap_lines = not (config.current.run and config.current.run.wrap == false)
+    end
+    return M.wrap_lines
+end
 
 local KEYMAP_SECTIONS = {
     {
@@ -39,6 +48,7 @@ local KEYMAP_SECTIONS = {
         items = {
             { key = "c", desc = "Clear active console log" },
             { key = "f", desc = "Toggle follow-tail scroll" },
+            { key = "w", desc = "Toggle line wrap" },
             { key = "<CR> / o / gx", desc = "Open URL in browser" },
         },
     },
@@ -101,10 +111,7 @@ local function open_url_under_cursor_or_active()
         local cursor = vim.api.nvim_win_get_cursor(M.win)
         local line = vim.api.nvim_buf_get_lines(M.buf, cursor[1] - 1, cursor[1], false)[1]
         if line then
-            url = line:match("(https?://[^%s%c\"'<>]+)")
-            if url then
-                url = url:gsub("[%.,;:)%]]+$", "")
-            end
+            url = process.extract_url_at(line, cursor[2] + 1)
         end
     end
 
@@ -147,21 +154,22 @@ local function update_winbar(sessions, active)
         return
     end
 
-    local left_chunks = {}
+    local tab_items = {}
     for i, s in ipairs(sessions) do
         local is_active = s.id == active.id
         local sym, _ = get_status_badge(s.status)
         local short_url = ""
         if s.detected_urls and #s.detected_urls > 0 then
-            local port = s.detected_urls[1]:match(":(%d+)")
+            local port = process.extract_port(s.detected_urls[1])
             if port then
                 short_url = " :" .. port
             end
         end
         local proj_name = (s.config and s.config.project_name) or s.name or s.id
         local label = string.format(" %d: %s %s%s ", i, sym, proj_name, short_url)
+        local compact_label = string.format(" %d: %s %s ", i, sym, proj_name)
         local hl = is_active and "CSharpExplorerTabActive" or "CSharpExplorerTabInactive"
-        left_chunks[#left_chunks + 1] = { label, hl }
+        tab_items[#tab_items + 1] = { id = s.id, label = label, compact_label = compact_label, hl = hl }
     end
 
     local status_txt = active.status
@@ -176,19 +184,45 @@ local function update_winbar(sessions, active)
         status_txt = status_txt .. " (PID " .. active.pid .. ")"
     end
 
-    left_chunks[#left_chunks + 1] = { "  " .. status_txt, "CSharpExplorerNormal" }
-
-    if active.detected_urls and #active.detected_urls > 0 then
-        left_chunks[#left_chunks + 1] = { " " .. active.detected_urls[1], "CSharpExplorerAccent" }
-    end
+    local status_chunk = { "  " .. status_txt, "CSharpExplorerNormal" }
+    local url_chunk = (active.detected_urls and #active.detected_urls > 0)
+            and { " " .. active.detected_urls[1], "CSharpExplorerAccent" }
+        or nil
 
     local follow_txt = "Follow: " .. (M.follow_tail and "ON" or "OFF")
-    local right_chunks = {
-        { follow_txt .. "  ", "CSharpExplorerMuted" },
-        { "? Help ", "CSharpExplorerMuted" },
-    }
 
-    chrome.set_winbar(M.win, left_chunks, right_chunks)
+    chrome.set_winbar(M.win, function(win_w)
+        local compact_right = win_w < 80
+        local right_chunks = {
+            { follow_txt .. (compact_right and " " or "  "), "CSharpExplorerMuted" },
+        }
+        if not is_wrap_enabled() then
+            right_chunks[#right_chunks + 1] = { compact_right and "W:OFF " or "Wrap: OFF  ", "CSharpExplorerMuted" }
+        end
+        right_chunks[#right_chunks + 1] = { compact_right and "? " or "? Help ", "CSharpExplorerMuted" }
+
+        local right_w = theme.chunks_width(right_chunks)
+        local avail_left = math.max(0, win_w - right_w - 2)
+        local status_w = theme.chunks_width({ status_chunk })
+        local tab_budget = avail_left >= (status_w + 40) and (avail_left - status_w) or avail_left
+        local left_chunks = chrome.build_tab_chunks({
+            items = tab_items,
+            active_id = active.id,
+            max_width = tab_budget,
+        })
+        local used_w = theme.chunks_width(left_chunks)
+        if used_w + status_w <= avail_left then
+            left_chunks[#left_chunks + 1] = status_chunk
+            used_w = used_w + status_w
+            if url_chunk and (avail_left - used_w) >= 12 then
+                local clipped_url = theme.truncate_chunks({ url_chunk }, avail_left - used_w)
+                for _, c in ipairs(clipped_url) do
+                    left_chunks[#left_chunks + 1] = c
+                end
+            end
+        end
+        return left_chunks, right_chunks
+    end)
 end
 
 local function setup_keymaps(buf)
@@ -272,6 +306,24 @@ local function setup_keymaps(buf)
             pcall(vim.api.nvim_win_set_cursor, M.win, { count, 0 })
         end
     end, vim.tbl_extend("force", opts, { desc = "Toggle follow-tail scroll" }))
+
+    vim.keymap.set("n", "w", function()
+        M.wrap_lines = not is_wrap_enabled()
+        if M.win and vim.api.nvim_win_is_valid(M.win) then
+            chrome.apply_window_options(M.win, {
+                mode = "log",
+                wrap = M.wrap_lines,
+                cursorline = false,
+                winfixheight = true,
+            })
+            if not M.wrap_lines then
+                chrome.reset_horizontal_scroll(M.win)
+            end
+        end
+        local sessions = process.get_sessions()
+        local active = M.active_session_id and process.get_session(M.active_session_id)
+        update_winbar(sessions, active)
+    end, vim.tbl_extend("force", opts, { desc = "Toggle line wrap" }))
 
     vim.keymap.set("n", "d", function()
         if M.active_session_id then
@@ -361,6 +413,8 @@ function M.open(state, opts)
         bufname = "CSharpExplorer://Run",
         focus = opts.focus,
         cursorline = false,
+        mode = "log",
+        wrap = is_wrap_enabled(),
         buf = M.buf,
     })
 
@@ -390,6 +444,15 @@ end
 function M.render()
     if not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then
         return
+    end
+
+    if M.win and vim.api.nvim_win_is_valid(M.win) then
+        chrome.apply_window_options(M.win, {
+            mode = "log",
+            wrap = is_wrap_enabled(),
+            cursorline = false,
+            winfixheight = true,
+        })
     end
 
     vim.api.nvim_buf_clear_namespace(M.buf, M.ns_id, 0, -1)
@@ -433,9 +496,12 @@ function M.render()
     M._last_rendered_seq = active.ring_buffer._total_seq
     M._has_placeholder = has_placeholder
 
-    if M.follow_tail and M.win and vim.api.nvim_win_is_valid(M.win) then
-        if session_changed or chrome.should_auto_scroll(M.win, M.buf, prev_count) then
+    if M.win and vim.api.nvim_win_is_valid(M.win) then
+        if M.follow_tail and (session_changed or chrome.should_auto_scroll(M.win, M.buf, prev_count)) then
             pcall(vim.api.nvim_win_set_cursor, M.win, { #log_lines, 0 })
+        end
+        if not is_wrap_enabled() then
+            chrome.reset_horizontal_scroll(M.win)
         end
     end
 end

@@ -247,7 +247,7 @@ function M.render_process_badges(state)
                     hl = "CSharpExplorerBadgeOk"
                     local port = nil
                     if active_dbg.detected_urls and #active_dbg.detected_urls > 0 then
-                        port = active_dbg.detected_urls[1]:match(":(%d+)")
+                        port = process.extract_port(active_dbg.detected_urls[1])
                     end
                     text = port and string.format(" ● debug :%s ", port) or " ● debug "
                 else
@@ -259,7 +259,7 @@ function M.render_process_badges(state)
                     hl = "CSharpExplorerBadgeOk"
                     local port = nil
                     if active_proc.detected_urls and #active_proc.detected_urls > 0 then
-                        port = active_proc.detected_urls[1]:match(":(%d+)")
+                        port = process.extract_port(active_proc.detected_urls[1])
                     end
                     text = port and string.format(" ● :%s ", port) or " ● running "
                 elseif active_proc.status == "starting" then

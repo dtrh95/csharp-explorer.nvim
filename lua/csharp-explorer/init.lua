@@ -8,6 +8,8 @@ local navigation = require("csharp-explorer.actions.navigation")
 local metadata = require("csharp-explorer.metadata")
 local diagnostics = require("csharp-explorer.diagnostics")
 local properties = require("csharp-explorer.actions.properties")
+local theme = require("csharp-explorer.ui.theme")
+local chrome = require("csharp-explorer.ui.chrome")
 
 local M = {}
 
@@ -112,11 +114,7 @@ function M.toggle()
     M.win = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_buf(M.win, M.buf)
 
-    vim.wo[M.win].wrap = false
-    vim.wo[M.win].number = false
-    vim.wo[M.win].relativenumber = false
-    vim.wo[M.win].signcolumn = "no"
-    vim.wo[M.win].foldcolumn = "0"
+    chrome.apply_window_options(M.win, { winfixwidth = true, cursorline = true })
 
     vim.bo[M.buf].filetype = "csharpexplorer"
     vim.bo[M.buf].buftype = "nofile"
@@ -124,6 +122,14 @@ function M.toggle()
     vim.bo[M.buf].bufhidden = "wipe"
     vim.bo[M.buf].modifiable = false
     vim.bo[M.buf].readonly = true
+
+    local sol_name = (M.tree and M.tree._name) or vim.fs.basename(M.solution_path or "")
+    local sol_icon = (config.current.icons and config.current.icons.solution) or "󰘐 "
+    chrome.set_winbar(
+        M.win,
+        { { " " .. sol_icon .. sol_name, "CSharpExplorerTreeRoot" } },
+        { { "? Help ", "CSharpExplorerMuted" } }
+    )
 
     pcall(function()
         require("blink.cmp").setup_buffer(M.buf, { enabled = false })
@@ -462,6 +468,7 @@ function M.test_debug_select(opts)
 end
 
 function M.setup(opts)
+    theme.setup()
     config.setup(opts)
     M.config = config.current
 

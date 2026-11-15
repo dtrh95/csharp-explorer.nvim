@@ -1,28 +1,16 @@
 local renderer = require("csharp-explorer.renderer")
 local metadata = require("csharp-explorer.metadata")
 local node_utils = require("csharp-explorer.node")
+local chrome = require("csharp-explorer.ui.chrome")
 local uv = vim.uv or vim.loop
 
 local M = {}
 
 local function focus_editor_window(state)
-    local alt = vim.fn.win_getid(vim.fn.winnr("#"))
-    if
-        alt ~= 0
-        and alt ~= state.win
-        and vim.api.nvim_win_is_valid(alt)
-        and vim.api.nvim_win_get_config(alt).relative == ""
-    then
-        vim.api.nvim_set_current_win(alt)
-        return
+    local target_win = chrome.resolve_editor_window(state)
+    if target_win and vim.api.nvim_win_is_valid(target_win) then
+        vim.api.nvim_set_current_win(target_win)
     end
-    for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-        if w ~= state.win and vim.api.nvim_win_is_valid(w) and vim.api.nvim_win_get_config(w).relative == "" then
-            vim.api.nvim_set_current_win(w)
-            return
-        end
-    end
-    vim.cmd("rightbelow vsplit")
 end
 
 M.focus_editor_window = focus_editor_window

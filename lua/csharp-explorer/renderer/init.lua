@@ -2,30 +2,20 @@ local config = require("csharp-explorer.config")
 local node_utils = require("csharp-explorer.node")
 local metadata = require("csharp-explorer.metadata")
 local clipboard = require("csharp-explorer.actions.clipboard")
+local theme = require("csharp-explorer.ui.theme")
+local chrome = require("csharp-explorer.ui.chrome")
 
 local M = {}
 
 M.line_to_node = {}
 M.process_ns_id = vim.api.nvim_create_namespace("CSharpExplorerProcess")
 
-local function ensure_hl_groups()
-    vim.api.nvim_set_hl(0, "CSharpExplorerCut", {
-        sp = "#e5c07b",
-        undercurl = true,
-        italic = true,
-    })
-    vim.api.nvim_set_hl(0, "CSharpExplorerCopied", {
-        sp = "#56b6c2",
-        undercurl = true,
-    })
-end
-
 function M.render(state)
     if not state.tree or not state.buf or not vim.api.nvim_buf_is_valid(state.buf) then
         return
     end
 
-    ensure_hl_groups()
+    theme.ensure()
 
     local lines = {}
     local hl_map = {}
@@ -34,36 +24,36 @@ function M.render(state)
     local function build_lines(node, indent, parent)
         node._parent = parent
         local icon = ""
-        local hl = "Normal"
+        local hl = "CSharpExplorerTreeFile"
 
         if node._type == "solution" then
             icon = config.current.icons.solution
-            hl = "Keyword"
+            hl = "CSharpExplorerTreeRoot"
         elseif node._type == "folder" then
             icon = node._expanded and config.current.icons.folder_open or config.current.icons.folder_closed
-            hl = "Directory"
+            hl = "CSharpExplorerTreeFolder"
         elseif node._type == "project" then
             if config.current.dynamic_icons and config.current.dynamic_icons.enabled ~= false and node._path then
                 node._archetype = node._archetype or metadata.get_project_profile(node._path).archetype
                 icon = config.current.icons["project_" .. node._archetype] or config.current.icons.project
                 hl = (config.current.project_highlights and config.current.project_highlights[node._archetype])
-                    or "Type"
+                    or "CSharpExplorerTreeProject"
             else
                 icon = config.current.icons.project
-                hl = "Type"
+                hl = "CSharpExplorerTreeProject"
             end
         elseif node_utils.is_file(node) then
             icon = config.current.icons[node._type] or config.current.icons.cs_file
-            hl = "String"
+            hl = "CSharpExplorerAccent"
         elseif node._type == "dependencies" then
             icon = config.current.icons.dependencies
-            hl = "Directory"
+            hl = "CSharpExplorerTreeDeps"
         elseif node._type == "package_group" or node._type == "package" then
             icon = config.current.icons[node._type]
-            hl = "Special"
+            hl = "CSharpExplorerTreeDeps"
         elseif node._type == "project_reference_group" or node._type == "project_reference" then
             icon = config.current.icons[node._type]
-            hl = "Type"
+            hl = "CSharpExplorerTreeDeps"
         end
 
         local arrow
@@ -71,6 +61,31 @@ function M.render(state)
             arrow = node._expanded and config.current.icons.arrow_open or config.current.icons.arrow_closed
         else
             arrow = "  "
+        end
+
+        local name_hl
+        if node._type == "solution" then
+            name_hl = "CSharpExplorerTreeRoot"
+        elseif node._type == "project" then
+            name_hl = (
+                config.current.dynamic_icons
+                and config.current.dynamic_icons.enabled ~= false
+                and node._archetype
+                and config.current.project_highlights
+                and config.current.project_highlights[node._archetype]
+            ) or "CSharpExplorerTreeProject"
+        elseif node._type == "folder" or node._type == "solution_folder" then
+            name_hl = "CSharpExplorerTreeFolder"
+        elseif
+            node._type == "dependencies"
+            or node._type == "package_group"
+            or node._type == "project_reference_group"
+            or node._type == "package"
+            or node._type == "project_reference"
+        then
+            name_hl = "CSharpExplorerTreeDeps"
+        else
+            name_hl = "CSharpExplorerTreeFile"
         end
 
         local display = indent .. arrow .. icon .. node._name
@@ -81,6 +96,12 @@ function M.render(state)
 
         local col_start = #indent + #arrow
         table.insert(hl_map, { line = #lines - 1, col_start = col_start, col_end = col_start + #icon, hl = hl })
+        table.insert(hl_map, {
+            line = #lines - 1,
+            col_start = col_start + #icon,
+            col_end = col_start + #icon + #node._name,
+            hl = name_hl,
+        })
 
         if node._expanded and node._has_children then
             if node._type == "project" then
@@ -152,6 +173,16 @@ function M.render(state)
     end
 
     M.render_process_badges(state)
+
+    if state.win and vim.api.nvim_win_is_valid(state.win) then
+        local sol_name = (state.tree and state.tree._name) or vim.fs.basename(state.solution_path or "")
+        local sol_icon = (config.current.icons and config.current.icons.solution) or "󰘐 "
+        chrome.set_winbar(
+            state.win,
+            { { " " .. sol_icon .. sol_name, "CSharpExplorerTreeRoot" } },
+            { { "? Help ", "CSharpExplorerMuted" } }
+        )
+    end
 end
 
 function M.render_process_badges(state)
@@ -209,41 +240,41 @@ function M.render_process_badges(state)
 
             if active_dbg then
                 if active_dbg.status == "paused" then
-                    hl = "DiagnosticWarn"
+                    hl = "CSharpExplorerBadgeWarn"
                     local l = (active_dbg.current_frame and active_dbg.current_frame.line) or "?"
-                    text = " ⏸ L" .. tostring(l)
+                    text = " ⏸ L" .. tostring(l) .. " "
                 elseif active_dbg.status == "running" then
-                    hl = "Special"
+                    hl = "CSharpExplorerBadgeOk"
                     local port = nil
                     if active_dbg.detected_urls and #active_dbg.detected_urls > 0 then
                         port = active_dbg.detected_urls[1]:match(":(%d+)")
                     end
-                    text = port and string.format(" ● debug :%s", port) or " ● debug"
+                    text = port and string.format(" ● debug :%s ", port) or " ● debug "
                 else
-                    hl = "DiagnosticWarn"
-                    text = " ◐ building"
+                    hl = "CSharpExplorerBadgeWarn"
+                    text = " ◐ building "
                 end
             elseif active_proc then
                 if active_proc.status == "running" then
-                    hl = "DiagnosticOk"
+                    hl = "CSharpExplorerBadgeOk"
                     local port = nil
                     if active_proc.detected_urls and #active_proc.detected_urls > 0 then
                         port = active_proc.detected_urls[1]:match(":(%d+)")
                     end
-                    text = port and string.format("● :%s ", port) or "● running "
+                    text = port and string.format(" ● :%s ", port) or " ● running "
                 elseif active_proc.status == "starting" then
-                    hl = "DiagnosticWarn"
-                    text = "◐ starting "
+                    hl = "CSharpExplorerBadgeWarn"
+                    text = " ◐ starting "
                 elseif active_proc.status == "stopping" then
-                    hl = "DiagnosticWarn"
-                    text = "◌ stopping "
+                    hl = "CSharpExplorerBadgeMuted"
+                    text = " ◌ stopping "
                 end
             elseif failed_dbg then
-                hl = "DiagnosticError"
-                text = " ✗ debug failed"
+                hl = "CSharpExplorerBadgeError"
+                text = " ✗ failed "
             elseif failed_proc then
-                hl = "DiagnosticError"
-                text = string.format("▲ exit %s ", tostring(failed_proc.exit_code or 1))
+                hl = "CSharpExplorerBadgeError"
+                text = string.format(" ▲ exit %s ", tostring(failed_proc.exit_code or 1))
             end
 
             if text and hl then

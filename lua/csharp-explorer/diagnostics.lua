@@ -223,6 +223,7 @@ function M.render_extmarks(state)
                 end
             end
             if #chunks > 0 then
+                chunks[1][1] = " " .. chunks[1][1]
                 pcall(vim.api.nvim_buf_set_extmark, state.buf, M.ns_id, line_num - 1, 0, {
                     virt_text = chunks,
                     virt_text_pos = "right_align",

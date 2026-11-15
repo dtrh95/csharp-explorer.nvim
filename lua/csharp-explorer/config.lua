@@ -30,10 +30,10 @@ M.defaults = {
         project_reference = "󰌛 ",
     },
     project_highlights = {
-        web = "Special",
-        console = "Function",
-        library = "Type",
-        test = "DiagnosticOk",
+        web = "CSharpExplorerTreeProjectWeb",
+        console = "CSharpExplorerTreeProjectConsole",
+        library = "CSharpExplorerTreeProjectLib",
+        test = "CSharpExplorerTreeProjectTest",
     },
     dynamic_icons = {
         enabled = true,
@@ -113,8 +113,11 @@ M.defaults = {
     ui = {
         width = 30,
         sync_nvim_tree_width = true,
+        winbar = true,
+        border = "rounded",
     },
     keymaps = {
+        help = "?",
         close = "q",
         open = { "<CR>", "o", "<2-LeftMouse>" },
         vsplit = "<C-v>",

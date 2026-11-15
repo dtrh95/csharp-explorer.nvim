@@ -26,14 +26,26 @@ local function create_ring_buffer(max_size)
         _gen = 0,
     }
 
-    function buf:push(item)
+    local function push_single(self, line)
         self._total_seq = self._total_seq + 1
         if self._count < self._max then
             self._count = self._count + 1
-            self._items[self._count] = item
+            self._items[self._count] = line
         else
-            self._items[self._head] = item
+            self._items[self._head] = line
             self._head = (self._head % self._max) + 1
+        end
+    end
+
+    function buf:push(item)
+        local s = tostring(item or "")
+        if s:find("[\r\n]") then
+            s = s:gsub("\r\n", "\n"):gsub("\r", "")
+            for _, part in ipairs(vim.split(s, "\n", { plain = true })) do
+                push_single(self, part)
+            end
+        else
+            push_single(self, s)
         end
     end
 

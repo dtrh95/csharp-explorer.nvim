@@ -497,28 +497,26 @@ function M.jump_editor_to_frame(frame)
     if not (frame and frame.source_path and vim.fn.filereadable(frame.source_path) == 1) then
         return
     end
-    local cur_win, target_win = vim.api.nvim_get_current_win(), nil
-    for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-        local ok_cfg, win_cfg = pcall(vim.api.nvim_win_get_config, w)
-        local is_float = ok_cfg and win_cfg.relative ~= ""
-        local ft = vim.bo[vim.api.nvim_win_get_buf(w)].filetype or ""
-        if vim.api.nvim_win_is_valid(w) and not is_float and not ft:find("^csharpexplorer") then
-            target_win = w
-            break
-        end
-    end
-    target_win = target_win or cur_win
+    local chrome = require("csharp-explorer.ui.chrome")
+    local metadata = require("csharp-explorer.metadata")
+    local cur_win = vim.api.nvim_get_current_win()
+    local target_win = chrome.resolve_editor_window()
     if target_win and vim.api.nvim_win_is_valid(target_win) then
         vim.api.nvim_set_current_win(target_win)
-        local b = vim.fn.bufadd(frame.source_path)
-        vim.fn.bufload(b)
-        vim.api.nvim_win_set_buf(target_win, b)
+        local cur_path = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(target_win))
+        if metadata.normalize_path(cur_path) ~= metadata.normalize_path(frame.source_path) then
+            vim.cmd("edit " .. vim.fn.fnameescape(frame.source_path))
+        end
         pcall(
             vim.api.nvim_win_set_cursor,
             target_win,
             { math.max(1, frame.line or 1), math.max(0, (frame.column or 1) - 1) }
         )
-        if not (config.current.debug and config.current.debug.focus_on_break) and cur_win ~= target_win then
+        if
+            not (config.current.debug and config.current.debug.focus_on_break)
+            and cur_win ~= target_win
+            and vim.api.nvim_win_is_valid(cur_win)
+        then
             vim.api.nvim_set_current_win(cur_win)
         end
     end

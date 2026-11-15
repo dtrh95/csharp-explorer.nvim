@@ -154,15 +154,86 @@ local function sanitize_line(raw_line)
     return clean
 end
 
-local function extract_urls(clean_line)
-    local urls = {}
-    for url in clean_line:gmatch("[Nn]ow listening on:%s*(https?://[^%s%c]+)") do
-        urls[#urls + 1] = url
+local function clean_url(raw)
+    if type(raw) ~= "string" or raw == "" then
+        return nil
     end
-    for url in clean_line:gmatch("[Ll]istening on:%s*(https?://[^%s%c]+)") do
-        urls[#urls + 1] = url
+    local url = raw:gsub("^[\"'\\]+", "")
+    while url ~= "" do
+        local stripped = url:gsub("[\"'\\,;}%)>%.]+$", "")
+        if stripped:sub(-1) == "]" then
+            local _, opens = stripped:gsub("%[", "")
+            local _, closes = stripped:gsub("%]", "")
+            if closes > opens then
+                stripped = stripped:sub(1, -2)
+            end
+        end
+        if stripped == url then
+            break
+        end
+        url = stripped
+    end
+    if not url:match("^https?://[^/%s]+") then
+        return nil
+    end
+    return url
+end
+
+local function extract_port(url)
+    if type(url) ~= "string" then
+        return nil
+    end
+    return url:match("://%[[^%]]+%]:(%d+)") or url:match("://[^%[%]/]+:(%d+)")
+end
+
+local function extract_urls(clean_line)
+    if type(clean_line) ~= "string" or clean_line == "" then
+        return {}
+    end
+    local urls = {}
+    local seen = {}
+    local function push_url(raw)
+        local cleaned = clean_url(raw)
+        if cleaned and not seen[cleaned] then
+            seen[cleaned] = true
+            urls[#urls + 1] = cleaned
+        end
+    end
+    for raw in clean_line:gmatch("[Ll]istening on:%s*\\?[\"']?(https?://[^%s%c\"'\\{}<>(),;]+)") do
+        push_url(raw)
+    end
+    if clean_line:find("ListeningOnAddress", 1, true) then
+        for raw in clean_line:gmatch('"address"%s*:%s*\\?"(https?://[^"%s%c\\]+)') do
+            push_url(raw)
+        end
     end
     return urls
+end
+
+local function extract_url_at(line, col1)
+    if type(line) ~= "string" or line == "" then
+        return nil
+    end
+    local pos = 1
+    local first_url = nil
+    while pos <= #line do
+        local s, e = line:find("https?://[^%s%c\"'\\{}<>(),;]+", pos)
+        if not s then
+            break
+        end
+        local cleaned = clean_url(line:sub(s, e))
+        if cleaned then
+            if not first_url then
+                first_url = cleaned
+            end
+            local clean_end = s + #cleaned - 1
+            if col1 and col1 >= s and col1 <= clean_end then
+                return cleaned
+            end
+        end
+        pos = e + 1
+    end
+    return first_url
 end
 
 local function process_stream_data(session, chunk, is_stderr)
@@ -832,7 +903,10 @@ end
 
 M.create_ring_buffer = create_ring_buffer
 M.sanitize_line = sanitize_line
+M.clean_url = clean_url
+M.extract_port = extract_port
 M.extract_urls = extract_urls
+M.extract_url_at = extract_url_at
 M.signal_process_tree = signal_process_tree
 
 return M

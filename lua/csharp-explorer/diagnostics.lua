@@ -210,6 +210,13 @@ function M.render_extmarks(state)
     local icons = diag_cfg.icons or {}
     local hls = diag_cfg.highlights or {}
 
+    local default_hls = {
+        error = "CSharpExplorerDiagnosticError",
+        warn = "CSharpExplorerDiagnosticWarn",
+        info = "CSharpExplorerDiagnosticInfo",
+        hint = "CSharpExplorerDiagnosticHint",
+    }
+
     for line_num, node in pairs(renderer.line_to_node) do
         local summary = M.get_node_display_summary(node, diag_cfg)
         if summary then
@@ -218,7 +225,7 @@ function M.render_extmarks(state)
                 local count = summary[sev]
                 if count and count > 0 then
                     local icon = icons[sev] or ""
-                    local hl = hls[sev] or "DiagnosticSignError"
+                    local hl = hls[sev] or default_hls[sev] or "CSharpExplorerDiagnosticError"
                     table.insert(chunks, { icon .. count .. " ", hl })
                 end
             end

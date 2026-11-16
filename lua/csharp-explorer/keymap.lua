@@ -21,31 +21,31 @@ M.specs = {
     { id = "toggle_gitignore", group = "Navigation", desc = "Toggle gitignored items" },
     { id = "reload_all", group = "Navigation", desc = "Reload projects and LSP" },
 
-    { id = "create", group = "Edit & Refactor", desc = "Create new item" },
-    { id = "delete", group = "Edit & Refactor", desc = "Delete item" },
-    { id = "rename", group = "Edit & Refactor", desc = "Rename item" },
-    { id = "copy", group = "Edit & Refactor", desc = "Copy item" },
-    { id = "cut", group = "Edit & Refactor", desc = "Cut item" },
-    { id = "paste", group = "Edit & Refactor", desc = "Paste item" },
-    { id = "add", group = "Edit & Refactor", desc = "Add C# item from template" },
-    { id = "sync_namespace", group = "Edit & Refactor", desc = "Sync namespace to folder path" },
+    { id = "create", group = "Edit and refactor", desc = "Create new item" },
+    { id = "delete", group = "Edit and refactor", desc = "Delete item" },
+    { id = "rename", group = "Edit and refactor", desc = "Rename item" },
+    { id = "copy", group = "Edit and refactor", desc = "Copy item" },
+    { id = "cut", group = "Edit and refactor", desc = "Cut item" },
+    { id = "paste", group = "Edit and refactor", desc = "Paste item" },
+    { id = "add", group = "Edit and refactor", desc = "Add C# item from template" },
+    { id = "sync_namespace", group = "Edit and refactor", desc = "Sync namespace to folder path" },
 
-    { id = "build", group = "Build & Test", desc = "Build project or solution" },
-    { id = "restore", group = "Build & Test", desc = "Restore dependencies" },
-    { id = "clean", group = "Build & Test", desc = "Clean build output" },
-    { id = "test", group = "Build & Test", desc = "Run tests" },
-    { id = "task_output", group = "Build & Test", desc = "Toggle task output window" },
-    { id = "cancel_task", group = "Build & Test", desc = "Cancel running task" },
+    { id = "build", group = "Build and test", desc = "Build project or solution" },
+    { id = "restore", group = "Build and test", desc = "Restore dependencies" },
+    { id = "clean", group = "Build and test", desc = "Clean build output" },
+    { id = "test", group = "Build and test", desc = "Run tests" },
+    { id = "task_output", group = "Build and test", desc = "Toggle task output window" },
+    { id = "cancel_task", group = "Build and test", desc = "Cancel running task" },
 
-    { id = "run", group = "Run & Debug", desc = "Run project" },
-    { id = "run_select", group = "Run & Debug", desc = "Select run profile" },
-    { id = "run_window", group = "Run & Debug", desc = "Toggle run window" },
-    { id = "debug", group = "Run & Debug", desc = "Debug project" },
-    { id = "debug_select", group = "Run & Debug", desc = "Select debug profile" },
-    { id = "debug_test", group = "Run & Debug", desc = "Debug unit tests" },
-    { id = "debug_window", group = "Run & Debug", desc = "Toggle debug window" },
-    { id = "manage_compounds", group = "Run & Debug", desc = "Manage compound launch configurations" },
-    { id = "action_menu", group = "Run & Debug", desc = "Open action menu" },
+    { id = "run", group = "Run and debug", desc = "Run project" },
+    { id = "run_select", group = "Run and debug", desc = "Select run profile" },
+    { id = "run_window", group = "Run and debug", desc = "Toggle run window" },
+    { id = "debug", group = "Run and debug", desc = "Debug project" },
+    { id = "debug_select", group = "Run and debug", desc = "Select debug profile" },
+    { id = "debug_test", group = "Run and debug", desc = "Debug unit tests" },
+    { id = "debug_window", group = "Run and debug", desc = "Toggle debug window" },
+    { id = "manage_compounds", group = "Run and debug", desc = "Manage compound launch configurations" },
+    { id = "action_menu", group = "Run and debug", desc = "Open action menu" },
 
     { id = "search_text", group = "Search", desc = "Search text in solution" },
     { id = "search_symbols", group = "Search", desc = "Search symbols in solution" },
@@ -229,7 +229,7 @@ end
 
 function M.open_help(_state)
     local km = config.current.keymaps
-    local group_order = { "Navigation", "Edit & Refactor", "Build & Test", "Run & Debug", "Search" }
+    local group_order = { "Navigation", "Edit and refactor", "Build and test", "Run and debug", "Search" }
     local grouped = {}
     for _, g in ipairs(group_order) do
         grouped[g] = {}
@@ -264,7 +264,7 @@ function M.open_help(_state)
         end
     end
 
-    return chrome.show_help_modal("C# Explorer Shortcuts", sections)
+    return chrome.show_help_modal("Explorer shortcuts", sections)
 end
 
 return M

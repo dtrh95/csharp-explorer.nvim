@@ -8,7 +8,7 @@ local navigation = require("csharp-explorer.actions.navigation")
 local metadata = require("csharp-explorer.metadata")
 local diagnostics = require("csharp-explorer.diagnostics")
 local properties = require("csharp-explorer.actions.properties")
-local theme = require("csharp-explorer.ui.theme")
+local appearance = require("csharp-explorer.ui.appearance")
 local chrome = require("csharp-explorer.ui.chrome")
 
 local M = {}
@@ -25,6 +25,8 @@ M.run_config = require("csharp-explorer.run_config")
 M.compound = require("csharp-explorer.compound")
 M.reload = require("csharp-explorer.reload")
 M.run_window = require("csharp-explorer.ui.run_window")
+M.appearance = appearance
+M.hi_test = appearance.hi_test
 
 local function parse_workspace_solution(root_dir)
     local slnx_files = vim.fn.glob(root_dir .. "/*.slnx", false, true)
@@ -114,7 +116,7 @@ function M.toggle()
     M.win = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_buf(M.win, M.buf)
 
-    chrome.apply_window_options(M.win, { winfixwidth = true, cursorline = true })
+    chrome.apply_window_options(M.win, { role = "sidebar", winfixwidth = true, cursorline = true })
 
     vim.bo[M.buf].filetype = "csharpexplorer"
     vim.bo[M.buf].buftype = "nofile"
@@ -468,12 +470,15 @@ function M.test_debug_select(opts)
 end
 
 function M.setup(opts)
-    theme.setup()
     config.setup(opts)
+    appearance.setup(config.current.appearance)
     M.config = config.current
 
     vim.api.nvim_create_user_command("CSharpExplorer", M.toggle, { desc = "Toggle C# Solution Explorer" })
     vim.api.nvim_create_user_command("CSharpExplorerToggle", M.toggle, { desc = "Toggle the CSharpExplorer tree" })
+    vim.api.nvim_create_user_command("CSharpExplorerHiTest", function()
+        appearance.hi_test()
+    end, { desc = "Inspect CSharpExplorer highlight groups and link chains" })
     vim.api.nvim_create_user_command(
         "CSharpExplorerFindFile",
         M.find_file,

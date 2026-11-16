@@ -1,8 +1,7 @@
 local config = require("csharp-explorer.config")
 local node_utils = require("csharp-explorer.node")
-local metadata = require("csharp-explorer.metadata")
 local clipboard = require("csharp-explorer.actions.clipboard")
-local theme = require("csharp-explorer.ui.theme")
+local appearance = require("csharp-explorer.ui.appearance")
 local chrome = require("csharp-explorer.ui.chrome")
 
 local M = {}
@@ -15,7 +14,7 @@ function M.render(state)
         return
     end
 
-    theme.ensure()
+    appearance.ensure()
 
     local lines = {}
     local hl_map = {}
@@ -23,84 +22,58 @@ function M.render(state)
 
     local function build_lines(node, indent, parent)
         node._parent = parent
-        local icon = ""
-        local hl = "CSharpExplorerTreeFile"
+        local node_path = node._path or node._dir
+        local is_cut = node_path and clipboard.is_cut(node_path) or false
+        local is_copied = node_path and clipboard.is_copied(node_path) or false
 
-        if node._type == "solution" then
-            icon = config.current.icons.solution
-            hl = "CSharpExplorerTreeRoot"
-        elseif node._type == "folder" then
-            icon = node._expanded and config.current.icons.folder_open or config.current.icons.folder_closed
-            hl = "CSharpExplorerTreeFolder"
-        elseif node._type == "project" then
-            if config.current.dynamic_icons and config.current.dynamic_icons.enabled ~= false and node._path then
-                node._archetype = node._archetype or metadata.get_project_profile(node._path).archetype
-                icon = config.current.icons["project_" .. node._archetype] or config.current.icons.project
-                hl = (config.current.project_highlights and config.current.project_highlights[node._archetype])
-                    or "CSharpExplorerTreeProject"
-            else
-                icon = config.current.icons.project
-                hl = "CSharpExplorerTreeProject"
+        local diag_summary = nil
+        if appearance.config and appearance.config.highlight_diagnostics ~= "none" then
+            local diags = package.loaded["csharp-explorer.diagnostics"]
+            if diags and config.current.diagnostics and config.current.diagnostics.enabled ~= false then
+                diag_summary = diags.get_node_display_summary(node, config.current.diagnostics)
             end
-        elseif node_utils.is_file(node) then
-            icon = config.current.icons[node._type] or config.current.icons.cs_file
-            hl = "CSharpExplorerAccent"
-        elseif node._type == "dependencies" then
-            icon = config.current.icons.dependencies
-            hl = "CSharpExplorerTreeDeps"
-        elseif node._type == "package_group" or node._type == "package" then
-            icon = config.current.icons[node._type]
-            hl = "CSharpExplorerTreeDeps"
-        elseif node._type == "project_reference_group" or node._type == "project_reference" then
-            icon = config.current.icons[node._type]
-            hl = "CSharpExplorerTreeDeps"
         end
 
-        local arrow
-        if node._has_children then
-            arrow = node._expanded and config.current.icons.arrow_open or config.current.icons.arrow_closed
-        else
-            arrow = "  "
-        end
+        local style = appearance.resolve_node_style(node, {
+            is_cut = is_cut,
+            is_copied = is_copied,
+            diagnostics = diag_summary,
+        })
 
-        local name_hl
-        if node._type == "solution" then
-            name_hl = "CSharpExplorerTreeRoot"
-        elseif node._type == "project" then
-            name_hl = (
-                config.current.dynamic_icons
-                and config.current.dynamic_icons.enabled ~= false
-                and node._archetype
-                and config.current.project_highlights
-                and config.current.project_highlights[node._archetype]
-            ) or "CSharpExplorerTreeProject"
-        elseif node._type == "folder" or node._type == "solution_folder" then
-            name_hl = "CSharpExplorerTreeFolder"
-        elseif
-            node._type == "dependencies"
-            or node._type == "package_group"
-            or node._type == "project_reference_group"
-            or node._type == "package"
-            or node._type == "project_reference"
-        then
-            name_hl = "CSharpExplorerTreeDeps"
-        else
-            name_hl = "CSharpExplorerTreeFile"
-        end
-
+        local arrow = style.arrow
+        local icon = style.icon
         local display = indent .. arrow .. icon .. node._name
         table.insert(lines, display)
         node._line_num = #lines
         node._arrow_end_col = vim.fn.strdisplaywidth(indent .. arrow)
         M.line_to_node[#lines] = node
 
-        local col_start = #indent + #arrow
-        table.insert(hl_map, { line = #lines - 1, col_start = col_start, col_end = col_start + #icon, hl = hl })
+        local col_indent = #indent
+        local col_arrow = col_indent + #arrow
+        local col_icon = col_arrow + #icon
+        local col_name = col_icon + #node._name
+
+        if col_arrow > col_indent and style.arrow_hl then
+            table.insert(hl_map, {
+                line = #lines - 1,
+                col_start = col_indent,
+                col_end = col_arrow,
+                hl = style.arrow_hl,
+            })
+        end
+        if col_icon > col_arrow and style.icon_hl then
+            table.insert(hl_map, {
+                line = #lines - 1,
+                col_start = col_arrow,
+                col_end = col_icon,
+                hl = style.icon_hl,
+            })
+        end
         table.insert(hl_map, {
             line = #lines - 1,
-            col_start = col_start + #icon,
-            col_end = col_start + #icon + #node._name,
-            hl = name_hl,
+            col_start = col_icon,
+            col_end = col_name,
+            hl = style.name_hl,
         })
 
         if node._expanded and node._has_children then
@@ -146,25 +119,10 @@ function M.render(state)
     vim.api.nvim_buf_clear_namespace(state.buf, ns, 0, -1)
 
     for _, h in ipairs(hl_map) do
-        pcall(vim.api.nvim_buf_add_highlight, state.buf, ns, h.hl, h.line, h.col_start, h.col_end)
-    end
-
-    for line_num, node in pairs(M.line_to_node) do
-        local node_path = node._path or node._dir
-        if node_path then
-            local clip_hl = nil
-            if clipboard.is_cut(node_path) then
-                clip_hl = "CSharpExplorerCut"
-            elseif clipboard.is_copied(node_path) then
-                clip_hl = "CSharpExplorerCopied"
-            end
-            if clip_hl then
-                pcall(vim.api.nvim_buf_set_extmark, state.buf, ns, line_num - 1, 0, {
-                    end_col = #lines[line_num],
-                    hl_group = clip_hl,
-                    priority = 200,
-                })
-            end
+        if vim.hl and vim.hl.range then
+            vim.hl.range(state.buf, ns, h.hl, { h.line, h.col_start }, { h.line, h.col_end })
+        else
+            pcall(vim.api.nvim_buf_add_highlight, state.buf, ns, h.hl, h.line, h.col_start, h.col_end)
         end
     end
 

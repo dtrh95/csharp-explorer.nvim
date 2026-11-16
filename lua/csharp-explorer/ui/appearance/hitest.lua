@@ -46,7 +46,7 @@ local function format_attrs(attrs)
 end
 
 function M.build_rows()
-    local domain_order = { "Chrome", "Tree", "Decorations", "Winbar", "Diagnostics", "Debug" }
+    local domain_order = { "Chrome", "Tree", "Decorations", "Winbar", "Diagnostics", "Git", "Debug" }
     local grouped = {}
     for _, d in ipairs(domain_order) do
         grouped[d] = {}

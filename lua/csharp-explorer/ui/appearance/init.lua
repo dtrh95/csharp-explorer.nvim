@@ -25,6 +25,7 @@ local DEFAULT_CONFIG = {
     },
     highlight_clipboard = "all",
     highlight_diagnostics = "none",
+    highlight_git = "none",
     highlight_project_names = false,
     sanitize_anti_violet = true,
     highlights = {},
@@ -230,8 +231,14 @@ function M.resolve_node_style(node, context)
 
     local clip_mode = M.config.highlight_clipboard or "all"
     local diag_mode = M.config.highlight_diagnostics or "none"
+    local git_mode = M.config.highlight_git or "none"
+    local git_icon_hl = context.git and context.git.icon_hl or nil
+    local git_name_hl = context.git and context.git.name_hl or nil
 
     local icon_groups = { icon_hl }
+    if git_icon_hl and (git_mode == "icon" or git_mode == "all") then
+        icon_groups[#icon_groups + 1] = git_icon_hl
+    end
     if clip_hl and (clip_mode == "icon" or clip_mode == "all") then
         icon_groups[#icon_groups + 1] = clip_hl
     end
@@ -243,6 +250,9 @@ function M.resolve_node_style(node, context)
     end
 
     local name_groups = { name_hl }
+    if git_name_hl and (git_mode == "name" or git_mode == "all") then
+        name_groups[#name_groups + 1] = git_name_hl
+    end
     if clip_hl and (clip_mode == "name" or clip_mode == "all") then
         name_groups[#name_groups + 1] = clip_hl
     end

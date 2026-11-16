@@ -2,7 +2,7 @@ local config = require("csharp-explorer.config")
 local debug_engine = require("csharp-explorer.debug")
 local process = require("csharp-explorer.process")
 local chrome = require("csharp-explorer.ui.chrome")
-local theme = require("csharp-explorer.ui.theme")
+local winbar = require("csharp-explorer.ui.winbar")
 local ViewBuilder = require("csharp-explorer.ui.view_builder")
 
 local M = {
@@ -29,7 +29,7 @@ end
 
 local KEYMAP_SECTIONS = {
     {
-        title = "Views & Sessions",
+        title = "Views and sessions",
         items = {
             { key = "1 / gd", desc = "Switch to Debugger view" },
             { key = "2 / gc", desc = "Switch to Console view" },
@@ -40,7 +40,7 @@ local KEYMAP_SECTIONS = {
         },
     },
     {
-        title = "Execution Control",
+        title = "Execution control",
         items = {
             { key = "<F5> / c", desc = "Continue execution" },
             { key = "<F10> / n", desc = "Step over" },
@@ -53,7 +53,7 @@ local KEYMAP_SECTIONS = {
         },
     },
     {
-        title = "Watches & Variables",
+        title = "Watches and variables",
         items = {
             { key = "<CR> / o", desc = "Toggle variable or jump to frame" },
             { key = "<Tab>", desc = "Toggle variable or jump to next section" },
@@ -63,7 +63,7 @@ local KEYMAP_SECTIONS = {
         },
     },
     {
-        title = "Breakpoints & Console",
+        title = "Breakpoints and console",
         items = {
             { key = "<F9>", desc = "Toggle breakpoint or exception filter" },
             { key = "c", desc = "Edit breakpoint condition (in Breakpoints view)" },
@@ -273,7 +273,7 @@ local function handle_condition_action()
 end
 
 local function show_help_popup()
-    chrome.show_help_modal("Debug Window Shortcuts", KEYMAP_SECTIONS)
+    chrome.show_help_modal("Debug window shortcuts", KEYMAP_SECTIONS)
 end
 
 local function update_winbar(sessions, active)
@@ -313,12 +313,13 @@ local function update_winbar(sessions, active)
             right_chunks[#right_chunks + 1] = { status_txt .. (cr and " " or "  "), "CSharpExplorerMuted" }
         end
         if M.current_view == "console" and not is_wrap_enabled() then
-            right_chunks[#right_chunks + 1] = { cr and "W:OFF " or "Wrap: OFF  ", "CSharpExplorerMuted" }
+            right_chunks[#right_chunks + 1] = { cr and "w:off " or "Wrap: off  ", "CSharpExplorerMuted" }
         end
         right_chunks[#right_chunks + 1] = { cr and "? " or "? Help ", "CSharpExplorerMuted" }
 
-        local avail_tabs = math.max(12, win_w - theme.chunks_width(right_chunks) - theme.chunks_width(pill_chunks) - 2)
-        local left_chunks = (#sessions == 0 or not active) and { { " [No Active Sessions] ", "CSharpExplorerMuted" } }
+        local avail_tabs =
+            math.max(12, win_w - winbar.chunks_width(right_chunks) - winbar.chunks_width(pill_chunks) - 2)
+        local left_chunks = (#sessions == 0 or not active) and { { " (no active sessions) ", "CSharpExplorerMuted" } }
             or chrome.build_tab_chunks({ items = tab_items, active_id = active.id, max_width = avail_tabs })
         for _, pc in ipairs(pill_chunks) do
             left_chunks[#left_chunks + 1] = pc
@@ -738,7 +739,7 @@ function M.render()
         vb.line_items[#vb.lines] = { type = "section", name = "watches" }
         local watches = debug_engine.get_watches()
         if #watches == 0 then
-            vb:add_line("    (No watches defined)", "CSharpExplorerMuted")
+            vb:add_line("    (no watches defined)", "CSharpExplorerMuted")
         else
             for _, w in ipairs(watches) do
                 local w_state = (active and active.watch_states and active.watch_states[w.expression]) or w
@@ -771,7 +772,7 @@ function M.render()
         vb:add_section("Variables", "<CR>/<Tab> expand")
         vb.line_items[#vb.lines] = { type = "section", name = "variables" }
         if not active or not active.scopes or #active.scopes == 0 then
-            vb:add_line("    (No variables available in current frame)", "CSharpExplorerMuted")
+            vb:add_line("    (no variables available in current frame)", "CSharpExplorerMuted")
         else
             for _, sc in ipairs(active.scopes) do
                 vb:add_line(string.format("  [%s]", sc.name or "Scope"), "CSharpExplorerTitle", { type = "scope" })
@@ -783,7 +784,7 @@ function M.render()
         vb:add_section("Call stack", "<CR> jump to frame")
         vb.line_items[#vb.lines] = { type = "section", name = "call_stack" }
         if not active or not active.frames or #active.frames == 0 then
-            vb:add_line("    (No call stack frames)", "CSharpExplorerMuted")
+            vb:add_line("    (no call stack frames)", "CSharpExplorerMuted")
         else
             for _, f in ipairs(active.frames) do
                 local is_cur = active.current_frame and active.current_frame.id == f.id
@@ -804,7 +805,7 @@ function M.render()
             end
         end
     elseif M.current_view == "breakpoints" then
-        vb:add_section(".NET Exception Filters", "<CR>/<Space> toggle")
+        vb:add_section(".NET exception filters", "<CR>/<Space> toggle")
         vb.line_items[#vb.lines] = { type = "section", name = "filters" }
         local active_filters = debug_engine.get_exception_filters()
         local available = { "user-unhandled", "all" }
@@ -819,11 +820,11 @@ function M.render()
         end
         vb:add_line("")
 
-        vb:add_section("Workspace Breakpoints", "[c]ond [d]el [X]clear")
+        vb:add_section("Workspace breakpoints", "[c]ond [d]el [X]clear")
         vb.line_items[#vb.lines] = { type = "section", name = "breakpoints" }
         local bps = debug_engine.get_breakpoints()
         if #bps == 0 then
-            vb:add_line("    (No breakpoints set)", "CSharpExplorerMuted")
+            vb:add_line("    (no breakpoints set)", "CSharpExplorerMuted")
         else
             for _, bp in ipairs(bps) do
                 local c_str = (bp.condition and bp.condition ~= "") and string.format(" [when: %s]", bp.condition) or ""

@@ -1,7 +1,7 @@
 local config = require("csharp-explorer.config")
 local process = require("csharp-explorer.process")
 local chrome = require("csharp-explorer.ui.chrome")
-local theme = require("csharp-explorer.ui.theme")
+local winbar = require("csharp-explorer.ui.winbar")
 
 local M = {
     buf = nil,
@@ -25,7 +25,7 @@ end
 
 local KEYMAP_SECTIONS = {
     {
-        title = "Tabs & Sessions",
+        title = "Tabs and sessions",
         items = {
             { key = "] / <Tab>", desc = "Next process tab" },
             { key = "[ / <S-Tab>", desc = "Previous process tab" },
@@ -35,7 +35,7 @@ local KEYMAP_SECTIONS = {
         },
     },
     {
-        title = "Process Control",
+        title = "Process control",
         items = {
             { key = "r", desc = "Restart active process" },
             { key = "s", desc = "Stop active process" },
@@ -44,7 +44,7 @@ local KEYMAP_SECTIONS = {
         },
     },
     {
-        title = "Console Output",
+        title = "Console output",
         items = {
             { key = "c", desc = "Clear active console log" },
             { key = "f", desc = "Toggle follow-tail scroll" },
@@ -139,7 +139,7 @@ local function open_url_under_cursor_or_active()
 end
 
 local function show_help_popup()
-    chrome.show_help_modal("Run Window Shortcuts", KEYMAP_SECTIONS)
+    chrome.show_help_modal("Run window shortcuts", KEYMAP_SECTIONS)
 end
 
 local function update_winbar(sessions, active)
@@ -148,7 +148,7 @@ local function update_winbar(sessions, active)
     end
 
     if #sessions == 0 or not active then
-        local left = { { " [No Active Processes]", "CSharpExplorerMuted" } }
+        local left = { { " (no active processes)", "CSharpExplorerMuted" } }
         local right = { { "? Help ", "CSharpExplorerMuted" } }
         chrome.set_winbar(M.win, left, right)
         return
@@ -189,7 +189,7 @@ local function update_winbar(sessions, active)
             and { " " .. active.detected_urls[1], "CSharpExplorerAccent" }
         or nil
 
-    local follow_txt = "Follow: " .. (M.follow_tail and "ON" or "OFF")
+    local follow_txt = "Follow: " .. (M.follow_tail and "on" or "off")
 
     chrome.set_winbar(M.win, function(win_w)
         local compact_right = win_w < 80
@@ -197,25 +197,25 @@ local function update_winbar(sessions, active)
             { follow_txt .. (compact_right and " " or "  "), "CSharpExplorerMuted" },
         }
         if not is_wrap_enabled() then
-            right_chunks[#right_chunks + 1] = { compact_right and "W:OFF " or "Wrap: OFF  ", "CSharpExplorerMuted" }
+            right_chunks[#right_chunks + 1] = { compact_right and "w:off " or "Wrap: off  ", "CSharpExplorerMuted" }
         end
         right_chunks[#right_chunks + 1] = { compact_right and "? " or "? Help ", "CSharpExplorerMuted" }
 
-        local right_w = theme.chunks_width(right_chunks)
+        local right_w = winbar.chunks_width(right_chunks)
         local avail_left = math.max(0, win_w - right_w - 2)
-        local status_w = theme.chunks_width({ status_chunk })
+        local status_w = winbar.chunks_width({ status_chunk })
         local tab_budget = avail_left >= (status_w + 40) and (avail_left - status_w) or avail_left
         local left_chunks = chrome.build_tab_chunks({
             items = tab_items,
             active_id = active.id,
             max_width = tab_budget,
         })
-        local used_w = theme.chunks_width(left_chunks)
+        local used_w = winbar.chunks_width(left_chunks)
         if used_w + status_w <= avail_left then
             left_chunks[#left_chunks + 1] = status_chunk
             used_w = used_w + status_w
             if url_chunk and (avail_left - used_w) >= 12 then
-                local clipped_url = theme.truncate_chunks({ url_chunk }, avail_left - used_w)
+                local clipped_url = winbar.truncate_chunks({ url_chunk }, avail_left - used_w)
                 for _, c in ipairs(clipped_url) do
                     left_chunks[#left_chunks + 1] = c
                 end

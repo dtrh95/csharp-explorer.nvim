@@ -107,19 +107,19 @@ end
 local function ensure_dap_signs()
     pcall(require, "dap")
     if #vim.fn.sign_getdefined("DapBreakpoint") == 0 then
-        vim.fn.sign_define("DapBreakpoint", { text = "B", texthl = "DiagnosticError" })
+        vim.fn.sign_define("DapBreakpoint", { text = "B", texthl = "CSharpExplorerBpVerified" })
     end
     if #vim.fn.sign_getdefined("DapBreakpointCondition") == 0 then
-        vim.fn.sign_define("DapBreakpointCondition", { text = "C", texthl = "DiagnosticWarn" })
+        vim.fn.sign_define("DapBreakpointCondition", { text = "C", texthl = "CSharpExplorerBpCondition" })
     end
     if #vim.fn.sign_getdefined("DapBreakpointRejected") == 0 then
-        vim.fn.sign_define("DapBreakpointRejected", { text = "R", texthl = "DiagnosticWarn" })
+        vim.fn.sign_define("DapBreakpointRejected", { text = "R", texthl = "CSharpExplorerBpUnverified" })
     end
     if #vim.fn.sign_getdefined("DapLogPoint") == 0 then
-        vim.fn.sign_define("DapLogPoint", { text = "L", texthl = "DiagnosticInfo" })
+        vim.fn.sign_define("DapLogPoint", { text = "L", texthl = "CSharpExplorerBadgeInfo" })
     end
     if #vim.fn.sign_getdefined("DapStopped") == 0 then
-        vim.fn.sign_define("DapStopped", { text = "->", texthl = "DiagnosticInfo" })
+        vim.fn.sign_define("DapStopped", { text = "->", texthl = "CSharpExplorerStackCurrent" })
     end
 end
 

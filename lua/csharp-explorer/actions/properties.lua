@@ -42,7 +42,7 @@ end
 function M.inspect_node(node, state)
     if not node then
         return {
-            title = "Item Properties",
+            title = "Item properties",
             rows = {},
         }
     end
@@ -152,7 +152,7 @@ function M.inspect_node(node, state)
         end
 
         return {
-            title = "Item Properties: " .. node._name,
+            title = "Item properties: " .. node._name,
             rows = rows,
         }
     end
@@ -229,7 +229,7 @@ function M.inspect_node(node, state)
         end
 
         return {
-            title = "Project Properties: " .. node._name,
+            title = "Project properties: " .. node._name,
             rows = rows,
         }
     end
@@ -288,7 +288,7 @@ function M.inspect_node(node, state)
         end
 
         return {
-            title = "Solution Properties: " .. node._name,
+            title = "Solution properties: " .. node._name,
             rows = rows,
         }
     end
@@ -308,7 +308,7 @@ function M.inspect_node(node, state)
         }
 
         return {
-            title = "Package Properties: " .. (pkg.name or node._name),
+            title = "Package properties: " .. (pkg.name or node._name),
             rows = rows,
         }
     end
@@ -325,7 +325,7 @@ function M.inspect_node(node, state)
         }
 
         return {
-            title = "Reference Properties: " .. node._name,
+            title = "Reference properties: " .. node._name,
             rows = rows,
         }
     end
@@ -363,13 +363,13 @@ function M.inspect_node(node, state)
             table.insert(rows, { label = "Diagnostics", value = "Clean (0 issues)" })
         end
         return {
-            title = "Folder Properties: " .. node._name,
+            title = "Folder properties: " .. node._name,
             rows = rows,
         }
     end
 
     return {
-        title = "Item Properties: " .. (node._name or "Unknown"),
+        title = "Item properties: " .. (node._name or "Unknown"),
         rows = {
             { label = "Name", value = node._name or "Unknown" },
             { label = "Type", value = node._type or "Unknown" },
@@ -423,6 +423,7 @@ function M.show_node(node, state)
         title = model.title,
         footer = "K / q / <Esc> close",
         close_keys = { "<CR>", "K" },
+        border = config.current.properties and config.current.properties.border,
         width = width,
         height = height,
         filetype = "csharpexplorer-properties",

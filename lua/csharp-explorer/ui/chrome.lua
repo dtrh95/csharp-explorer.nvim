@@ -1,5 +1,6 @@
 local config = require("csharp-explorer.config")
-local theme = require("csharp-explorer.ui.theme")
+local appearance = require("csharp-explorer.ui.appearance")
+local winbar = require("csharp-explorer.ui.winbar")
 local ViewBuilder = require("csharp-explorer.ui.view_builder")
 
 local M = {}
@@ -80,7 +81,7 @@ function M.apply_window_options(win, opts)
     if not win or not vim.api.nvim_win_is_valid(win) then
         return
     end
-    theme.ensure()
+    appearance.ensure()
     opts = opts or {}
     local is_log = opts.mode == "log"
     local wrap = is_log
@@ -103,9 +104,7 @@ function M.apply_window_options(win, opts)
     if opts.winfixheight ~= nil then
         vim.wo[win].winfixheight = opts.winfixheight == true
     end
-    local hl_map = opts.winhighlight
-        or "Normal:CSharpExplorerNormal,NormalNC:CSharpExplorerNormalNC,CursorLine:CSharpExplorerCursorLine,FoldColumn:CSharpExplorerNormal,SignColumn:CSharpExplorerNormal,FloatBorder:CSharpExplorerBorder,WinBar:CSharpExplorerWinBar,WinBarNC:CSharpExplorerWinBarNC"
-    vim.wo[win].winhighlight = hl_map
+    appearance.attach_window(win, opts.role or "docked", opts.winhighlight)
 end
 
 function M.reset_horizontal_scroll(win)
@@ -209,7 +208,7 @@ function M.build_tab_chunks(opts)
             if cl_ind ~= "" then
                 out[#out + 1] = { cl_ind, "CSharpExplorerMuted" }
             end
-            local clipped = theme.truncate_chunks({ { cand_label, items[lo].hl } }, inner_budget)
+            local clipped = winbar.truncate_chunks({ { cand_label, items[lo].hl } }, inner_budget)
             for _, c in ipairs(clipped) do
                 out[#out + 1] = c
             end
@@ -218,7 +217,7 @@ function M.build_tab_chunks(opts)
             end
             return out
         end
-        return theme.truncate_chunks({ { cand_label, items[lo].hl } }, budget)
+        return winbar.truncate_chunks({ { cand_label, items[lo].hl } }, budget)
     end
 
     local out = {}
@@ -253,7 +252,17 @@ local function render_registered_winbar(win)
     if type(entry.left) == "function" then
         left_chunks, right_chunks = entry.left(win_w)
     end
-    vim.wo[win].winbar = theme.format_winbar(left_chunks, right_chunks, win_w)
+    vim.wo[win].winbar = winbar.format_winbar(left_chunks, right_chunks, win_w)
+end
+
+function M.refresh_winbars()
+    for w, _ in pairs(winbar_registry) do
+        if vim.api.nvim_win_is_valid(w) then
+            render_registered_winbar(w)
+        else
+            winbar_registry[w] = nil
+        end
+    end
 end
 
 local function ensure_winbar_autocmd()
@@ -330,6 +339,7 @@ function M.open_docked_window(state, opts)
     end
     vim.api.nvim_win_set_buf(win, buf)
     M.apply_window_options(win, {
+        role = "docked",
         winfixheight = true,
         cursorline = opts.cursorline ~= false,
         mode = opts.mode,
@@ -360,10 +370,7 @@ end
 function M.open_float(opts)
     opts = opts or {}
     local caller_win = vim.api.nvim_get_current_win()
-    local border = opts.border
-        or (config.current.ui and config.current.ui.border)
-        or (config.current.properties and config.current.properties.border)
-        or "rounded"
+    local border = opts.border or appearance.get_border()
     local width = opts.width or math.floor(vim.o.columns * 0.7)
     local height = opts.height or math.floor(vim.o.lines * 0.6)
     width = math.max(20, math.min(width, vim.o.columns - 4))
@@ -404,11 +411,12 @@ function M.open_float(opts)
 
     local win = vim.api.nvim_open_win(buf, true, win_cfg)
     M.apply_window_options(win, {
+        role = "float",
         cursorline = opts.cursorline ~= false,
         mode = opts.mode,
         wrap = opts.wrap,
         foldcolumn = opts.foldcolumn,
-        winhighlight = "Normal:CSharpExplorerFloatNormal,FoldColumn:CSharpExplorerFloatNormal,SignColumn:CSharpExplorerFloatNormal,FloatBorder:CSharpExplorerBorder,CursorLine:CSharpExplorerCursorLine,Title:CSharpExplorerTitle",
+        winhighlight = opts.winhighlight,
     })
 
     local closed = false

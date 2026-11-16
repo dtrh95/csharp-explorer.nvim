@@ -2,6 +2,7 @@ local metadata = require("csharp-explorer.metadata")
 local config = require("csharp-explorer.config")
 local node_utils = require("csharp-explorer.node")
 local diagnostics = require("csharp-explorer.diagnostics")
+local git = require("csharp-explorer.git")
 local navigation = require("csharp-explorer.actions.navigation")
 local chrome = require("csharp-explorer.ui.chrome")
 local ViewBuilder = require("csharp-explorer.ui.view_builder")
@@ -36,6 +37,22 @@ local function format_bytes(bytes)
         return string.format("%.1f KB", bytes / 1024)
     else
         return string.format("%.2f MB", bytes / (1024 * 1024))
+    end
+end
+
+local function append_git_rows(rows, node, include_branch)
+    if config.current.git and config.current.git.enable == false then
+        return
+    end
+    local branch = include_branch and git.get_branch(node) or nil
+    if branch and branch ~= "" then
+        table.insert(rows, { label = "Git branch", value = branch })
+    end
+    local status = git.get_node_status(node)
+    if status and status.display_status ~= "" then
+        table.insert(rows, { label = "Git status", value = status.display_status })
+    elseif git.is_indexed(node) then
+        table.insert(rows, { label = "Git status", value = "Clean" })
     end
 end
 
@@ -150,6 +167,7 @@ function M.inspect_node(node, state)
         else
             table.insert(rows, { label = "Diagnostics", value = "Clean (0 issues)" })
         end
+        append_git_rows(rows, node, false)
 
         return {
             title = "Item properties: " .. node._name,
@@ -227,6 +245,7 @@ function M.inspect_node(node, state)
         else
             table.insert(rows, { label = "Diagnostics", value = "Clean (0 issues)" })
         end
+        append_git_rows(rows, node, true)
 
         return {
             title = "Project properties: " .. node._name,
@@ -286,6 +305,7 @@ function M.inspect_node(node, state)
         else
             table.insert(rows, { label = "Diagnostics", value = "Clean (0 issues)" })
         end
+        append_git_rows(rows, node, true)
 
         return {
             title = "Solution properties: " .. node._name,
@@ -362,6 +382,7 @@ function M.inspect_node(node, state)
         else
             table.insert(rows, { label = "Diagnostics", value = "Clean (0 issues)" })
         end
+        append_git_rows(rows, node, false)
         return {
             title = "Folder properties: " .. node._name,
             rows = rows,

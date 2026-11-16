@@ -19,6 +19,9 @@ M.specs = {
     { id = "open_properties", group = "Navigation", desc = "Open project file" },
     { id = "item_properties", group = "Navigation", desc = "Show item properties" },
     { id = "toggle_gitignore", group = "Navigation", desc = "Toggle gitignored items" },
+    { id = "toggle_git_clean", group = "Navigation", desc = "Toggle git clean filter" },
+    { id = "next_git", group = "Navigation", desc = "Jump to next git change" },
+    { id = "prev_git", group = "Navigation", desc = "Jump to previous git change" },
     { id = "reload_all", group = "Navigation", desc = "Reload projects and LSP" },
 
     { id = "create", group = "Edit and refactor", desc = "Create new item" },
@@ -110,6 +113,18 @@ local function resolve_action(id, state)
         end
     elseif id == "toggle_gitignore" then
         return state.toggle_gitignore
+    elseif id == "toggle_git_clean" then
+        return function()
+            require("csharp-explorer.git").toggle_clean_filter(state)
+        end
+    elseif id == "next_git" then
+        return function()
+            require("csharp-explorer.git").jump_next(state)
+        end
+    elseif id == "prev_git" then
+        return function()
+            require("csharp-explorer.git").jump_prev(state)
+        end
     elseif id == "build" then
         return function()
             require("csharp-explorer.actions.build").execute(state, "build")

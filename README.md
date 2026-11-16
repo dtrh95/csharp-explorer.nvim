@@ -23,7 +23,8 @@ A lightweight C# Solution Explorer for Neovim that renders `.sln` and `.slnx` hi
 - **File Parsing Integration**: Displays C# source files, Razor components, Razor pages, XAML pages, resource files, `appsettings*.json`, `Dockerfile` variants, `.dockerignore`, and `.http` files inside each project.
 - **Live Metadata Sync**: Refreshes dependency nodes automatically on `BufWritePost` for `*.csproj`, `*.props`, `*.targets`, and `project.assets.json` while keeping expanded folders open.
 - **Finding Files**: Locate the active source buffer or `.csproj` in the solution tree with `:CSharpExplorerFindFile`.
-- **Gitignore Filtering and Clipboard**: Toggle gitignored files with `I` and copy, cut, or paste project files directly in the tree.
+- **Git Status and Clean Filtering**: Tracks working tree changes, staged items, renames, deletions, untracked files, merge conflicts, and branch names asynchronously via `git status --porcelain=v1 -z` without blocking the editor. Rolls up status across nested parent files, folders, dual-identity `.csproj` projects, virtual solution folders, and multi-repository solutions. Toggle gitignored files with `I`, hide clean files with `gC`, and jump across dirty items with `]c` and `[c`.
+- **Clipboard Operations**: Copy, cut, and paste project files or directories directly in the tree.
 - **Run Profiles and Orchestration**: Run project targets with `u` or select launch profiles with `U`. Discovers `launchSettings.json` across project subdirectories, strips JSONC comments and UTF-8 byte order marks, and runs projects with `dotnet run --no-launch-profile`. Applies profile environment variables, URLs, arguments, and working directories. Supports `dotnet watch --non-interactive` hot reload from `U`.
 - **Rider-Style Run Tool Window**: Toggle the bottom run tool window with `L` or `:CSharpExplorerRunWindow`. The window opens below the editor column and keeps the explorer sidebar at full height. Shows process tabs (`g1` to `g9`, `]`, `[`), status icons, bounded ring-buffer logs, detected listening URLs (`<CR>` or `gx` opens the browser), follow-tail toggle (`f`), and single or global stop and restart keys.
 - **JetBrains Rider-Style Debugger**: Launch projects in `netcoredbg` with `D` or select launch profiles with `gD`. Toggle the Rider-style bottom debug tool window with `M` or `:CSharpExplorerDebugWindow`. Supports multi-session tabs, view switching between Debugger, Console, and Breakpoints views, exception banners on uncaught exceptions, expandable watch expressions, expandable scope variables with property inspection, and interactive call stack navigation.
@@ -168,6 +169,27 @@ require("csharp-explorer").setup({
     },
     filter = {
         gitignored = true,
+        git_clean = false,
+    },
+    git = {
+        enable = true,
+        timeout = 400,
+        max_timeouts = 5,
+        debounce_ms = 120,
+        show_branch = true,
+        show_on_dirs = true,
+        show_on_open_dirs = false,
+        show_on_nested_parents = true,
+        placement = "right_align",
+        icons = {
+            conflict = "",
+            staged = "✓",
+            modified = "✗",
+            renamed = "➜",
+            deleted = "",
+            untracked = "★",
+            ignored = "◌",
+        },
     },
     refactor = {
         lsp_rename = true,
@@ -194,6 +216,7 @@ require("csharp-explorer").setup({
         },
         highlight_clipboard = "all",
         highlight_diagnostics = "none",
+        highlight_git = "none",
         highlight_project_names = false,
         sanitize_anti_violet = true,
         highlights = {},
@@ -214,6 +237,9 @@ require("csharp-explorer").setup({
         open_properties = "P",
         item_properties = "K",
         toggle_gitignore = "I",
+        toggle_git_clean = "gC",
+        next_git = "]c",
+        prev_git = "[c",
         expand_all = "E",
         collapse_all = "W",
         build = "B",
@@ -269,6 +295,9 @@ require("csharp-explorer").setup({
 - `:CSharpExplorerCancel`: Cancel the running dotnet task.
 - `:CSharpExplorerEnable`, `:CSharpExplorerDisable`, or `:CSharpExplorerTogglePlugin`: Enable, disable, or toggle plugin state.
 - `:CSharpExplorerRefresh`: Re-parse the solution and refresh expanded nodes.
+- `:CSharpExplorerGitRefresh`: Re-scan Git status across all repositories in the active solution.
+- `:CSharpExplorerGitToggleClean`: Toggle hiding clean Git items in the explorer tree.
+- `:CSharpExplorerGitNext` and `:CSharpExplorerGitPrev`: Jump to the next or previous modified Git item in the explorer tree.
 - `:CSharpExplorerExpandAll`: Expand all solution and project folders.
 - `:CSharpExplorerCollapseAll`: Collapse all nodes below the solution root.
 - `:CSharpExplorerRun`: Run the project or profile for the focused target.

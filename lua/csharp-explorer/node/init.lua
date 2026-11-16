@@ -90,8 +90,25 @@ function M.classify_file_type(f_name)
     return "cs_file"
 end
 
-local function get_gitignored_set(dir, files)
+local function get_gitignored_set(dir, files, owner_node)
     if #files == 0 then
+        return {}
+    end
+    local git_enabled = not (config.current.git and config.current.git.enable == false)
+    if git_enabled then
+        local git = require("csharp-explorer.git")
+        if git.is_indexed(dir) then
+            local ignored = {}
+            for _, f in ipairs(files) do
+                if git.is_ignored(f) then
+                    ignored[f] = true
+                end
+            end
+            return ignored
+        end
+        if owner_node then
+            owner_node._git_ignore_pending = true
+        end
         return {}
     end
     local input = table.concat(files, "\n")
@@ -313,7 +330,7 @@ function M.populate_cs_files(node)
         for _, d in ipairs(dirs) do
             all_scan[#all_scan + 1] = d
         end
-        ignored = get_gitignored_set(node._dir, all_scan)
+        ignored = get_gitignored_set(node._dir, all_scan, node)
     end
 
     local by_dir = {}
@@ -523,7 +540,7 @@ function M.populate_dependencies(project_node, root_node)
     project_node._meta_loaded = true
 end
 
-function M.reset_projects(node)
+function M.reset_projects(node, opts)
     if node._type == "project" then
         node._archetype = nil
         if node._cs_loaded or node._meta_loaded then
@@ -545,7 +562,13 @@ function M.reset_projects(node)
         end
     elseif node._children then
         for _, child in pairs(node._children) do
-            M.reset_projects(child)
+            M.reset_projects(child, { skip_git_refresh = true })
+        end
+    end
+    if not (opts and opts.skip_git_refresh) then
+        local git = package.loaded["csharp-explorer.git"]
+        if git and git.refresh_debounced then
+            git.refresh_debounced()
         end
     end
 end

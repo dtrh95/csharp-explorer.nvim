@@ -7,6 +7,7 @@ local keymap = require("csharp-explorer.keymap")
 local navigation = require("csharp-explorer.actions.navigation")
 local metadata = require("csharp-explorer.metadata")
 local diagnostics = require("csharp-explorer.diagnostics")
+local git = require("csharp-explorer.git")
 local properties = require("csharp-explorer.actions.properties")
 local appearance = require("csharp-explorer.ui.appearance")
 local chrome = require("csharp-explorer.ui.chrome")
@@ -27,6 +28,7 @@ M.reload = require("csharp-explorer.reload")
 M.run_window = require("csharp-explorer.ui.run_window")
 M.appearance = appearance
 M.hi_test = appearance.hi_test
+M.git = git
 
 local function parse_workspace_solution(root_dir)
     local slnx_files = vim.fn.glob(root_dir .. "/*.slnx", false, true)
@@ -45,6 +47,9 @@ function M.ensure_tree()
     if not M.tree or M._root_dir ~= root_dir then
         M.tree = parse_workspace_solution(root_dir)
         M._root_dir = root_dir
+        if M.tree and config.current.git and config.current.git.enable ~= false then
+            git.sync_tree(M.tree, M)
+        end
     end
     return M.tree
 end
@@ -53,6 +58,9 @@ function M.enable()
     config.current.enabled = true
     if config.current.diagnostics and config.current.diagnostics.enabled ~= false then
         diagnostics.attach(M)
+    end
+    if config.current.git and config.current.git.enable ~= false then
+        git.attach(M)
     end
     vim.api.nvim_exec_autocmds("User", { pattern = "CSharpExplorerEnable" })
     vim.notify("CSharp Explorer Enabled", vim.log.levels.INFO)
@@ -64,6 +72,7 @@ function M.disable()
         M.toggle()
     end
     diagnostics.detach()
+    git.detach()
     local runner = require("csharp-explorer.runner")
     runner.shutdown()
     require("csharp-explorer.process").shutdown()
@@ -125,13 +134,8 @@ function M.toggle()
     vim.bo[M.buf].modifiable = false
     vim.bo[M.buf].readonly = true
 
-    local sol_name = (M.tree and M.tree._name) or vim.fs.basename(M.solution_path or "")
-    local sol_icon = (config.current.icons and config.current.icons.solution) or "󰘐 "
-    chrome.set_winbar(
-        M.win,
-        { { " " .. sol_icon .. sol_name, "CSharpExplorerTreeRoot" } },
-        { { "? Help ", "CSharpExplorerMuted" } }
-    )
+    local left_wb, right_wb = renderer.build_sidebar_winbar_chunks(M)
+    chrome.set_winbar(M.win, left_wb, right_wb)
 
     pcall(function()
         require("blink.cmp").setup_buffer(M.buf, { enabled = false })
@@ -142,8 +146,11 @@ function M.toggle()
 
     keymap.apply(M)
 
-    renderer.render(M)
     M.is_active = true
+    renderer.render(M)
+    if config.current.git and config.current.git.enable ~= false then
+        git.sync_tree(M.tree, M)
+    end
 end
 
 function M.find_file()
@@ -236,6 +243,22 @@ function M.toggle_gitignore()
     vim.notify("Gitignored files: " .. state, vim.log.levels.INFO)
 end
 
+function M.toggle_git_clean()
+    git.toggle_clean_filter(M)
+end
+
+function M.git_refresh()
+    git.refresh(M, { force = true })
+end
+
+function M.next_git()
+    git.jump_next(M)
+end
+
+function M.prev_git()
+    git.jump_prev(M)
+end
+
 function M.refresh()
     if not M.tree then
         return
@@ -248,6 +271,10 @@ function M.refresh()
     if fresh_tree then
         node_utils.restore_tree_expansion(fresh_tree, snapshot)
         M.tree = fresh_tree
+    end
+
+    if config.current.git and config.current.git.enable ~= false then
+        git.refresh(M, { force = true })
     end
 
     if M.is_active and M.buf and vim.api.nvim_buf_is_valid(M.buf) then
@@ -350,6 +377,9 @@ end
 function M.reparse_solution()
     local root_dir = M._root_dir or vim.fn.getcwd()
     M.tree = parse_workspace_solution(root_dir)
+    if M.tree and config.current.git and config.current.git.enable ~= false then
+        git.sync_tree(M.tree, M)
+    end
     return M.tree
 end
 
@@ -472,6 +502,7 @@ end
 function M.setup(opts)
     config.setup(opts)
     appearance.setup(config.current.appearance)
+    git.setup(config.current.git)
     M.config = config.current
 
     vim.api.nvim_create_user_command("CSharpExplorer", M.toggle, { desc = "Toggle C# Solution Explorer" })
@@ -502,6 +533,26 @@ function M.setup(opts)
         { desc = "Toggle C# Solution Explorer Plugin" }
     )
     vim.api.nvim_create_user_command("CSharpExplorerRefresh", M.refresh, { desc = "Refresh C# Solution Explorer" })
+    vim.api.nvim_create_user_command(
+        "CSharpExplorerGitRefresh",
+        M.git_refresh,
+        { desc = "Refresh Git status in C# Solution Explorer" }
+    )
+    vim.api.nvim_create_user_command(
+        "CSharpExplorerGitToggleClean",
+        M.toggle_git_clean,
+        { desc = "Toggle hiding clean Git items in C# Solution Explorer" }
+    )
+    vim.api.nvim_create_user_command(
+        "CSharpExplorerGitNext",
+        M.next_git,
+        { desc = "Jump to next Git change in C# Solution Explorer" }
+    )
+    vim.api.nvim_create_user_command(
+        "CSharpExplorerGitPrev",
+        M.prev_git,
+        { desc = "Jump to previous Git change in C# Solution Explorer" }
+    )
     vim.api.nvim_create_user_command(
         "CSharpExplorerExpandAll",
         M.expand_all,
@@ -665,6 +716,9 @@ function M.setup(opts)
             group = augroup,
             callback = function()
                 pcall(function()
+                    git.detach()
+                end)
+                pcall(function()
                     require("csharp-explorer.process").shutdown()
                 end)
                 pcall(function()
@@ -730,6 +784,9 @@ function M.setup(opts)
 
     if config.current.diagnostics and config.current.diagnostics.enabled ~= false then
         diagnostics.attach(M)
+    end
+    if config.current.enabled ~= false and config.current.git and config.current.git.enable ~= false then
+        git.attach(M)
     end
 end
 
